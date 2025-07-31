@@ -1,0 +1,6 @@
+services:
+  warframe-hub-server:
+    image: openwf/warframe-hub-server
+    #build: .
+    ports:
+      - "6952:6952/udp"

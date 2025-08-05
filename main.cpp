@@ -8,6 +8,10 @@
 #include <MemoryRefReader.hpp>
 #include <StringWriter.hpp>
 
+#ifdef DOCKER
+#include <signal.h>
+#endif
+
 using namespace soup;
 
 [[nodiscard]] static std::string addHeader(const std::string& data)
@@ -198,5 +202,11 @@ int main(int argc, const char** argv)
 		return 1;
 	}
 	std::cout << "Bound to UDP/6952" << std::endl;
+
+#ifdef DOCKER
+	// Ctrl+C not killing your software? According to the professional ChatGPTs hired by Docker Inc, it's not an issue. Why? Because there's a workaround!
+	signal(SIGTERM, [](int) { exit(0); });
+#endif
+
 	serv.run();
 }

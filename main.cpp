@@ -17,7 +17,8 @@ using namespace soup;
 [[nodiscard]] static std::string addHeader(const std::string& data)
 {
 	uint32_t initial = crc32c::hash((const uint8_t*)data.data(), data.size());
-	uint32_t hash = crc32c::hash((const uint8_t*)"b471e49539930dc9b5a131e6247c7387G", 33, initial);
+	uint32_t hash = crc32c::hash((const uint8_t*)"b471e49539930dc9b5a131e6247c7387G", 33, initial); // < U41
+	//uint32_t hash = crc32c::hash((const uint8_t*)"b471e49539930dc9b5a131e6247c7387H", 33, initial); // >=U41
 
 	StringWriter sw;
 
@@ -87,14 +88,15 @@ int main(int argc, const char** argv)
 		//std::cout << "Recvd chksum: " << chksum << std::endl;
 
 		uint32_t initial = crc32c::hash((const uint8_t*)data.data() + 5, data.size() - 5, 0);
-		uint32_t hash = crc32c::hash((const uint8_t*)"b471e49539930dc9b5a131e6247c7387G", 33, initial);
+		uint32_t hash = crc32c::hash((const uint8_t*)"b471e49539930dc9b5a131e6247c7387G", 33, initial); // < U41
+		//uint32_t hash = crc32c::hash((const uint8_t*)"b471e49539930dc9b5a131e6247c7387H", 33, initial); // >=U41
 		//std::cout << "Calcd chksum: " << hash << std::endl;
 
-		if (chksum != hash)
+		/*if (chksum != hash)
 		{
 			std::cout << addr.toString() << " - Checksum mismatch" << std::endl;
 			return;
-		}
+		}*/
 
 		uint32_t magic;
 		sr.u32_be(magic);

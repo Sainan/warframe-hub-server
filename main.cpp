@@ -50,6 +50,7 @@ enum IncomingMsgIds : uint8_t
 	CMSG_MOVE = 0,
 	CMSG_JOIN = 3,
 	CMSG_LEAVE = 4, // contains the peer id, e.g. for 77h: 0007F6C91D 00000080 0400 B4 04 7700
+	CMSG_HEARTBEAT = 5,
 	CMSG_CONTROL = 7,
 };
 
@@ -59,6 +60,7 @@ enum OutgoingMsgIds : uint8_t
 	HMSG_PEER_INFO = 2,
 	HMSG_JOIN = 3,
 	HMSG_KICK = 4,
+	HMSG_HEARTBEAT = 5,
 	HMSG_CONTROL = 7,
 };
 
@@ -369,6 +371,29 @@ int main(int argc, const char** argv)
 			}
 			break;
 
+		case CMSG_HEARTBEAT:
+			{
+				uint16_t peerId;
+				sr.u16_le(peerId);
+				for (auto& peer : peers)
+				{
+					if (peer.id == peerId)
+					{
+						//std::cout << addr.toString() << " - Still alive" << std::endl;
+						peer.last_sign_of_life = time::millis();
+
+						StringWriter sw;
+						{ uint8_t b = 0xb4; sw.u8(b); }
+						{ uint8_t b = HMSG_HEARTBEAT; sw.u8(b); }
+						sw.u16_le(peerId);
+						s.udpServerSend(addr, packData(sw.data));
+
+						break;
+					}
+				}
+			}
+			break;
+
 		case CMSG_CONTROL:
 			{
 				uint16_t peerId;
@@ -387,11 +412,15 @@ int main(int argc, const char** argv)
 				sw.u16_le(peerId);
 				sw.oml(len);
 				sw.str(len, msg);
-				for (const auto& peer : peers)
+				for (auto& peer : peers)
 				{
 					if (peer.id != peerId)
 					{
 						s.udpServerSend(peer.addr, packData(sw.data));
+					}
+					else
+					{
+						peer.last_sign_of_life = time::millis();
 					}
 				}
 			}

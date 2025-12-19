@@ -1,6 +1,7 @@
 #include <iostream>
 
 #include <crc32c.hpp>
+#include <lzf.hpp>
 #include <MemoryRefReader.hpp>
 #include <Server.hpp>
 #include <ServerServiceUdp.hpp>
@@ -76,6 +77,8 @@ struct HubPeer
 	uint8_t zone;
 	uint8_t state = 0; // Need to defer introductions of remote peers a bit otherwise they are ignored.
 	uint32_t last_seq_id = 0;
+	uint32_t buffer_expected_size = 0;
+	std::string buffer;
 
 	void introduceTo(HubPeer& other, Socket& s)
 	{
@@ -121,7 +124,7 @@ int main(int argc, const char** argv)
 
 	ServerServiceUdp srv([](Socket& s, SocketAddr&& addr, std::string&& data, ServerServiceUdp&)
 	{
-		//std::cout << "Client says: " << string::bin2hex(data) << std::endl;
+		std::cout << "Client says: " << string::bin2hex(data) << std::endl;
 
 		MemoryRefReader sr(data);
 
@@ -129,9 +132,15 @@ int main(int argc, const char** argv)
 		sr.u8(compression_byte);
 		if (compression_byte != 0)
 		{
-			// Handling compression shouldn't be too hard because LZF is very simple and Oodle is just loading a DLL and calling some functions on it.
-			//std::cout << addr.toString() << " - Discarding compressed packet: " << string::bin2hex(data) << std::endl;
-			return;
+			if (compression_byte & 0x80)
+			{
+				sr.skip(1);
+			}
+
+			char buffer[3000];
+			const auto decompressed_size = lzf::decompress(data.data() + sr.getPosition(), data.size() - sr.getPosition(), buffer, sizeof(buffer));
+			data = std::string(buffer, decompressed_size);
+			sr = MemoryRefReader(data);
 		}
 
 		//std::cout << "Client says: " << string::bin2hex(data) << std::endl;
@@ -160,10 +169,13 @@ int main(int argc, const char** argv)
 			return;
 		}
 
-		std::string packed_data;
-		sr.str_lp<u16_le_t>(packed_data);
-		//std::cout << "packed_data: " << string::bin2hex(packed_data) << std::endl;
-		sr = MemoryRefReader(packed_data);
+		{
+			std::string packed_data;
+			sr.str_lp<u16_le_t>(packed_data); // max size = 49Fh
+			//std::cout << "packed_data: " << string::bin2hex(packed_data) << std::endl;
+			data = std::move(packed_data);
+		}
+		sr = MemoryRefReader(data);
 
 		uint8_t unk_byte;
 		sr.u8(unk_byte);
@@ -173,34 +185,67 @@ int main(int argc, const char** argv)
 			sr.u16_le(peerId);
 			uint32_t seqId;
 			sr.u32_le(seqId);
-			sr.skip(1); // 0xCC
 
-			//std::cout << addr.toString() << " - reliable packet from peerId=" << peerId << " with seqId=" << seqId << std::endl;
+			//std::cout << addr.toString() << " - Reliable packet from peerId=" << peerId << " with seqId=" << seqId << std::endl;
 
+			HubPeer* pPeer = nullptr;
 			for (auto& peer : peers)
 			{
 				if (peer.id == peerId)
 				{
-					// Because we ignore compressed packets, we might indeed have missed a few earlier packets, so ack incrementally.
-					while (peer.last_seq_id < seqId)
+					pPeer = &peer;
+
+					if (seqId != peer.last_seq_id + 1)
 					{
-						++peer.last_seq_id;
-
-						//std::cout << addr.toString() << " - sending ack to peerId=" << peerId << " for seqId=" << peer.last_seq_id << std::endl;
-
-						StringWriter sw;
-						{ uint8_t b = 0xb8; sw.u8(b); }
-						sw.u16_le(peerId);
-						sw.u32_le(peer.last_seq_id);
-						{ uint8_t b = 0xc8; sw.u8(b); }
-						s.udpServerSend(addr, packData(sw.data));
+						std::cout << addr.toString() << " - Ignoring out of order packet" << std::endl;
+						return;
 					}
+					peer.last_seq_id = seqId;
+
+					//std::cout << addr.toString() << " - Sending ack to peerId=" << peerId << " for seqId=" << peer.last_seq_id << std::endl;
+
+					StringWriter sw;
+					{ uint8_t b = 0xb8; sw.u8(b); }
+					sw.u16_le(peerId);
+					sw.u32_le(seqId);
+					{ uint8_t b = 0xc8; sw.u8(b); }
+					s.udpServerSend(addr, packData(sw.data));
 				}
+			}
+			if (!pPeer)
+			{
+				std::cout << addr.toString() << " - Ignoring reliable packet from unknown peer" << std::endl;
+				return;
+			}
+
+			sr.u8(unk_byte);
+			if (unk_byte == 0x90)
+			{
+				uint32_t total_length;
+				sr.u32_le(total_length);
+				pPeer->buffer.append(data.data() + sr.getPosition(), data.size() - sr.getPosition());
+				if (total_length != 0)
+				{
+					pPeer->buffer_expected_size = total_length;
+					return;
+				}
+				if (pPeer->buffer.size() < pPeer->buffer_expected_size)
+				{
+					return;
+				}
+				data = std::move(pPeer->buffer);
+				sr = MemoryRefReader(data);
+				pPeer->buffer_expected_size = 0;
+				pPeer->buffer.clear();
+			}
+			else
+			{
+				// 0xCC
 			}
 		}
 		else
 		{
-			// 0xB4
+			// unk_byte=0xB4
 		}
 
 		uint8_t packet_id = -1;
@@ -350,6 +395,10 @@ int main(int argc, const char** argv)
 					}
 				}
 			}
+			break;
+
+		default:
+			std::cout << addr.toString() << " - Unknown packet with id " << (int)packet_id << ": " << string::bin2hex(data) << std::endl;
 			break;
 		}
 	});

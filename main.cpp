@@ -86,6 +86,20 @@ struct HubPeer
 	std::string buffer;
 	std::deque<std::string> pending_reliables;
 
+	void sendReliablePacket(Socket& s, const std::string& data)
+	{
+		++this->last_send_seq_id;
+		std::cout << addr.toString() << " - Sending reliable packet to peerId=" << this->id << " with seqId=" << this->last_send_seq_id << std::endl;
+
+		StringWriter sw;
+		{ uint8_t b = 0xb8; sw.u8(b); }
+		sw.u16_le(this->id);
+		sw.u32_le(this->last_send_seq_id);
+		{ uint8_t b = 0xCC; sw.u8(b); }
+		sw.raw((void*)data.data(), data.size());
+		s.udpServerSend(addr, this->pending_reliables.emplace_back(packData(sw.data)));
+	}
+
 	void sendBigPacket(Socket& s, const std::string& data)
 	{
 		if (data.size() <= 0x49E)

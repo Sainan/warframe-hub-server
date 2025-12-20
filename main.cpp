@@ -2,6 +2,7 @@
 #include <iostream>
 
 #include <crc32c.hpp>
+#include <json.hpp>
 #include <lzf.hpp>
 #include <MemoryRefReader.hpp>
 #include <Server.hpp>
@@ -592,17 +593,34 @@ int main(int argc, const char** argv)
 
 				std::cout << addr.toString() << " - Got control message: " << msg << std::endl;
 
-				StringWriter sw;
-				{ uint8_t b = 0xb4; sw.u8(b); }
-				{ uint8_t b = HMSG_CONTROL; sw.u8(b); }
-				sw.u16_le(peerId);
-				sw.oml(len);
-				sw.str(len, msg);
-				for (auto& other : peers)
+				if (auto jr = json::decode(msg); jr && jr->isObj())
 				{
-					if (other.id != peerId && other.level == peer->level)
+					if (jr->reinterpretAsObj().contains("loadout"))
 					{
-						s.udpServerSend(other.addr, packData(sw.data));
+						peer->loadout = jr->reinterpretAsObj().at("loadout").asObj().encode();
+						for (auto& other : peers)
+						{
+							if (other.id != peerId && other.level == peer->level)
+							{
+								peer->introduceTo(other, s);
+							}
+						}
+					}
+					else
+					{
+						StringWriter sw;
+						{ uint8_t b = 0xb4; sw.u8(b); }
+						{ uint8_t b = HMSG_CONTROL; sw.u8(b); }
+						sw.u16_le(peerId);
+						sw.oml(len);
+						sw.str(len, msg);
+						for (auto& other : peers)
+						{
+							if (other.id != peerId && other.level == peer->level)
+							{
+								s.udpServerSend(other.addr, packData(sw.data));
+							}
+						}
 					}
 				}
 			}

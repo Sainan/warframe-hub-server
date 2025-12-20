@@ -163,6 +163,15 @@ static HubPeer* get_peer_by_id(uint16_t id)
 	return nullptr;
 }
 
+static void new_number_who_dis(Socket& s, SocketAddr& addr)
+{
+	StringWriter sw;
+	{ uint8_t b = 0xb4; sw.u8(b); }
+	{ uint8_t b = HMSG_KICK; sw.u8(b); }
+	{ uint16_t b = 0xFFFF; sw.u16_le(b); }
+	s.udpServerSend(addr, packData(sw.data));
+}
+
 static void broadcast_kick(Socket& s, uint16_t peerId)
 {
 	StringWriter sw;
@@ -343,11 +352,7 @@ int main(int argc, const char** argv)
 				if (!ok)
 				{
 					std::cout << addr.toString() << " - CMSG_MOVE from unknown peer, asking them to rejoin" << std::endl;
-					StringWriter sw;
-					{ uint8_t b = 0xb4; sw.u8(b); }
-					{ uint8_t b = HMSG_KICK; sw.u8(b); }
-					{ uint16_t b = 0xFFFF; sw.u16_le(b); }
-					s.udpServerSend(addr, packData(sw.data));
+					new_number_who_dis(s, addr);
 				}
 			}
 			break;
@@ -418,6 +423,11 @@ int main(int argc, const char** argv)
 					sw.u16_le(peerId);
 					s.udpServerSend(addr, packData(sw.data));
 				}
+				else
+				{
+					std::cout << addr.toString() << " - CMSG_HEARTBEAT from unknown peer, asking them to rejoin" << std::endl;
+					new_number_who_dis(s, addr);
+				}
 			}
 			break;
 
@@ -425,11 +435,12 @@ int main(int argc, const char** argv)
 			{
 				uint16_t peerId;
 				sr.u16_le(peerId);
-
-				std::string_view level;
-				if (auto peer = get_peer_by_id(peerId))
+				auto peer = get_peer_by_id(peerId);
+				if (!peer)
 				{
-					level = peer->level;
+					std::cout << addr.toString() << " - CMSG_CONTROL from unknown peer, asking them to rejoin" << std::endl;
+					new_number_who_dis(s, addr);
+					return;
 				}
 
 				uint32_t len;
@@ -445,11 +456,11 @@ int main(int argc, const char** argv)
 				sw.u16_le(peerId);
 				sw.oml(len);
 				sw.str(len, msg);
-				for (auto& peer : peers)
+				for (auto& other : peers)
 				{
-					if (peer.id != peerId && peer.level == level)
+					if (other.id != peerId && other.level == peer->level)
 					{
-						s.udpServerSend(peer.addr, packData(sw.data));
+						s.udpServerSend(other.addr, packData(sw.data));
 					}
 				}
 			}
@@ -473,6 +484,11 @@ int main(int argc, const char** argv)
 							peer->introduceTo(other, s);
 						}
 					}
+				}
+				else
+				{
+					std::cout << addr.toString() << " - CMSG_LOADOUT from unknown peer, asking them to rejoin" << std::endl;
+					new_number_who_dis(s, addr);
 				}
 			}
 			break;

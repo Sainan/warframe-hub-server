@@ -97,6 +97,7 @@ struct HubPeer
 			uint32_t total_length = static_cast<uint32_t>(data.size());
 			{
 				++this->last_send_seq_id;
+				//std::cout << addr.toString() << " - Sending reliable packet to peerId=" << this->id << " with seqId=" << this->last_send_seq_id << std::endl;
 
 				StringWriter sw;
 				{ uint8_t b = 0xb8; sw.u8(b); }
@@ -113,6 +114,7 @@ struct HubPeer
 				uint32_t chunk_size = remaining_bytes > 0x493 ? 0x493 : remaining_bytes;
 
 				++this->last_send_seq_id;
+				//std::cout << addr.toString() << " - Sending reliable packet to peerId=" << this->id << " with seqId=" << this->last_send_seq_id << std::endl;
 
 				StringWriter sw;
 				{ uint8_t b = 0xb8; sw.u8(b); }
@@ -228,6 +230,13 @@ int main(int argc, const char** argv)
 			sr.u16_le(peerId);
 			uint32_t seqId;
 			sr.u32_le(seqId);
+			sr.u8(unk_byte);
+
+			if (unk_byte == 0xC8)
+			{
+				//std::cout << addr.toString() << " - Got ack from peerId=" << peerId << " for seqId=" << seqId << std::endl;
+				return;
+			}
 
 			//std::cout << addr.toString() << " - Reliable packet from peerId=" << peerId << " with seqId=" << seqId << std::endl;
 
@@ -261,7 +270,6 @@ int main(int argc, const char** argv)
 				return;
 			}
 
-			sr.u8(unk_byte);
 			if (unk_byte == 0x90)
 			{
 				uint32_t total_length;
@@ -280,10 +288,6 @@ int main(int argc, const char** argv)
 				sr = MemoryRefReader(data);
 				pPeer->buffer_expected_size = 0;
 				pPeer->buffer.clear();
-			}
-			else if (unk_byte == 0xC8)
-			{
-				return; // End of data; client only wanted to let us know it acks what we sent.
 			}
 			else
 			{

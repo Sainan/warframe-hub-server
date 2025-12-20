@@ -99,7 +99,7 @@ struct HubPeer
 			uint32_t total_length = static_cast<uint32_t>(data.size());
 			{
 				++this->last_send_seq_id;
-				//std::cout << addr.toString() << " - Sending reliable packet to peerId=" << this->id << " with seqId=" << this->last_send_seq_id << std::endl;
+				std::cout << addr.toString() << " - Sending reliable packet to peerId=" << this->id << " with seqId=" << this->last_send_seq_id << std::endl;
 
 				StringWriter sw;
 				{ uint8_t b = 0xb8; sw.u8(b); }
@@ -116,7 +116,7 @@ struct HubPeer
 				uint32_t chunk_size = remaining_bytes > 0x493 ? 0x493 : remaining_bytes;
 
 				++this->last_send_seq_id;
-				//std::cout << addr.toString() << " - Sending reliable packet to peerId=" << this->id << " with seqId=" << this->last_send_seq_id << std::endl;
+				std::cout << addr.toString() << " - Sending reliable packet to peerId=" << this->id << " with seqId=" << this->last_send_seq_id << std::endl;
 
 				StringWriter sw;
 				{ uint8_t b = 0xb8; sw.u8(b); }
@@ -137,7 +137,7 @@ struct HubPeer
 		if (!this->pending_reliables.empty())
 		{
 			const auto seq_id = (this->last_send_seq_id - (this->pending_reliables.size() - 1));
-			//std::cout << addr.toString() << " - Resending reliable packet to peerId=" << this->id << " with seqId=" << this->last_send_seq_id << std::endl;
+			std::cout << addr.toString() << " - Resending reliable packet to peerId=" << this->id << " with seqId=" << this->last_send_seq_id << std::endl;
 			s.udpServerSend(this->addr, this->pending_reliables.front());
 		}
 	}
@@ -278,7 +278,7 @@ int main(int argc, const char** argv)
 				}
 				else
 				{
-					//std::cout << addr.toString() << " - Got ack from peerId=" << peerId << " for seqId=" << seqId << std::endl;
+					std::cout << addr.toString() << " - Got ack from peerId=" << peerId << " for seqId=" << seqId << std::endl;
 					peer->pending_reliables.pop_front();
 				}
 				return;
@@ -288,12 +288,12 @@ int main(int argc, const char** argv)
 
 			if (seqId != peer->last_recv_seq_id + 1)
 			{
-				std::cout << addr.toString() << " - Ignoring out of order packet" << std::endl;
+				std::cout << addr.toString() << " - Ignoring out of order packet from peerId=" << peerId << " with seqId=" << seqId << std::endl;
 				return;
 			}
 			peer->last_recv_seq_id = seqId;
 
-			//std::cout << addr.toString() << " - Sending ack to peerId=" << peerId << " for seqId=" << peer.last_recv_seq_id << std::endl;
+			std::cout << addr.toString() << " - Sending ack to peerId=" << peerId << " for seqId=" << seqId << std::endl;
 			StringWriter sw;
 			{ uint8_t b = 0xb8; sw.u8(b); }
 			sw.u16_le(peerId);

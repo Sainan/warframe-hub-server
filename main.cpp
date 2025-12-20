@@ -75,7 +75,7 @@ struct HubPeer
 	std::string acctid;
 	std::string clan_name;
 	std::string loadout;
-	//std::string level;
+	std::string level;
 	int16_t x, y, z;
 	int8_t rotation;
 	uint8_t zone;
@@ -329,7 +329,7 @@ int main(int argc, const char** argv)
 						sw.i8(peer.rotation);
 						for (auto& other : peers)
 						{
-							if (peer.id != other.id)
+							if (peer.id != other.id && peer.level == other.level)
 							{
 								s.udpServerSend(other.addr, packData(sw.data));
 							}
@@ -373,7 +373,7 @@ int main(int argc, const char** argv)
 				sr.u8(peer.zone);
 				sr.str_lp<u8_t>(peer.name);
 				sr.str_lp<u8_t>(peer.clan_name);
-				//sr.str_lp<u8_t>(peer.level);
+				sr.str_lp<u8_t>(peer.level);
 
 				StringWriter sw;
 				{ uint8_t b = 0xb4; sw.u8(b); }
@@ -428,6 +428,17 @@ int main(int argc, const char** argv)
 				uint16_t peerId;
 				sr.u16_le(peerId);
 
+				std::string_view level;
+				for (auto& peer : peers)
+				{
+					if (peer.id == peerId)
+					{
+						peer.last_sign_of_life = time::millis();
+						level = peer.level;
+						break;
+					}
+				}
+
 				uint32_t len;
 				sr.oml(len);
 				std::string msg;
@@ -443,13 +454,9 @@ int main(int argc, const char** argv)
 				sw.str(len, msg);
 				for (auto& peer : peers)
 				{
-					if (peer.id != peerId)
+					if (peer.id != peerId && peer.level == level)
 					{
 						s.udpServerSend(peer.addr, packData(sw.data));
-					}
-					else
-					{
-						peer.last_sign_of_life = time::millis();
 					}
 				}
 			}
@@ -470,7 +477,7 @@ int main(int argc, const char** argv)
 
 						for (auto& other : peers)
 						{
-							if (peer.id != other.id)
+							if (peer.id != other.id && peer.level == other.level)
 							{
 								other.introduceTo(peer, s);
 								peer.introduceTo(other, s);

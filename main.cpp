@@ -91,6 +91,7 @@ struct HubPeer
 	std::string name;
 	std::string acctid;
 	std::string clan_name;
+	std::string title;
 	std::string loadout;
 	std::string level;
 	std::string status;
@@ -103,6 +104,11 @@ struct HubPeer
 	uint32_t buffer_expected_size = 0;
 	std::string buffer;
 	std::deque<std::string> pending_reliables;
+
+	bool isU41orAbove() const noexcept
+	{
+		return salt != "b471e49539930dc9b5a131e6247c7387G";
+	}
 
 	void sendReliablePacket(Socket& s, const std::string& data)
 	{
@@ -186,6 +192,10 @@ struct HubPeer
 		sw.str_lp<u8_t>(this->name);
 		sw.str_lp<u8_t>(this->acctid);
 		sw.str_lp<u8_t>(this->clan_name);
+		if (other.isU41orAbove())
+		{
+			sw.str_lp<u8_t>(this->title);
+		}
 		sw.oml(this->loadout.size());
 		sw.str(this->loadout.size(), this->loadout.data());
 		sw.skip(1);
@@ -349,11 +359,15 @@ int main(int argc, const char** argv)
 		//std::cout << "Recvd chksum: " << chksum << std::endl;
 
 		uint32_t initial = crc32c::hash((const uint8_t*)data.data() + sr.getPosition(), data.size() - sr.getPosition(), 0);
-		std::string_view salt = "b471e49539930dc9b5a131e6247c7387G";
+		std::string_view salt = "b471e49539930dc9b5a131e6247c7387H"; // >= U41
 		if (crc32c::hash((const uint8_t*)salt.data(), salt.size(), initial) != chksum)
 		{
-			std::cout << addr.toString() << " - Checksum mismatch" << std::endl;
-			return;
+			salt = "b471e49539930dc9b5a131e6247c7387G"; // < U41
+			if (crc32c::hash((const uint8_t*)salt.data(), salt.size(), initial) != chksum)
+			{
+				std::cout << addr.toString() << " - Checksum mismatch" << std::endl;
+				return;
+			}
 		}
 
 		{
@@ -594,6 +608,10 @@ int main(int argc, const char** argv)
 				sr.u8(peer.zone);
 				sr.str_lp<u8_t>(peer.name);
 				sr.str_lp<u8_t>(peer.clan_name);
+				if (peer.isU41orAbove())
+				{
+					sr.str_lp<u8_t>(peer.title);
+				}
 				sr.str_lp<u8_t>(peer.level);
 
 				{

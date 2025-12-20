@@ -78,14 +78,58 @@ struct HubPeer
 	int8_t rotation;
 	uint8_t zone;
 	uint8_t state = 0; // Need to defer introductions of remote peers a bit otherwise they are ignored.
-	uint32_t last_seq_id = 0;
+	uint32_t last_recv_seq_id = 0;
+	uint32_t last_send_seq_id = 0; // TODO: Handle resending if the client doesn't ack.
 	uint32_t buffer_expected_size = 0;
 	std::string buffer;
+
+	void sendBigPacket(Socket& s, const std::string& data)
+	{
+		if (data.size() <= 0x49E)
+		{
+			StringWriter sw;
+			{ uint8_t b = 0xb4; sw.u8(b); }
+			s.udpServerSend(addr, packData(sw.data + data));
+		}
+		else
+		{
+			uint32_t total_length = static_cast<uint32_t>(data.size());
+			{
+				++this->last_send_seq_id;
+
+				StringWriter sw;
+				{ uint8_t b = 0xb8; sw.u8(b); }
+				sw.u16_le(this->id);
+				sw.u32_le(this->last_send_seq_id);
+				{ uint8_t b = 0x90; sw.u8(b); }
+				sw.u32_le(total_length);
+				sw.raw((void*)data.data(), 0x493);
+				s.udpServerSend(addr, packData(sw.data));
+			}
+			for (uint32_t offset = 0x493; offset != total_length; )
+			{
+				uint32_t remaining_bytes = total_length - offset;
+				uint32_t chunk_size = remaining_bytes > 0x493 ? 0x493 : remaining_bytes;
+
+				++this->last_send_seq_id;
+
+				StringWriter sw;
+				{ uint8_t b = 0xb8; sw.u8(b); }
+				sw.u16_le(this->id);
+				sw.u32_le(this->last_send_seq_id);
+				{ uint8_t b = 0x90; sw.u8(b); }
+				{ uint32_t dw = 0; sw.u32_le(dw); }
+				sw.raw((void*)(data.data() + offset), chunk_size);
+				s.udpServerSend(addr, packData(sw.data));
+
+				offset += chunk_size;
+			}
+		}
+	}
 
 	void introduceTo(HubPeer& other, Socket& s)
 	{
 		StringWriter sw;
-		{ uint8_t b = 0xb4; sw.u8(b); }
 		{ uint8_t b = HMSG_PEER_INFO; sw.u8(b); }
 		sw.u16_le(this->id);
 		sw.i16_le(this->x);
@@ -102,7 +146,7 @@ struct HubPeer
 		sw.oml(loadout.size());
 		sw.str(loadout.size(), loadout.data());
 		sw.skip(69); // Client complaints that the packet is 'invalid' if it's not padded?
-		s.udpServerSend(other.addr, packData(sw.data));
+		other.sendBigPacket(s, sw.data);
 	}
 };
 static std::vector<HubPeer> peers;
@@ -126,7 +170,7 @@ int main(int argc, const char** argv)
 
 	ServerServiceUdp srv([](Socket& s, SocketAddr&& addr, std::string&& data, ServerServiceUdp&)
 	{
-		std::cout << "Client says: " << string::bin2hex(data) << std::endl;
+		//std::cout << "Client says: " << string::bin2hex(data) << std::endl;
 
 		MemoryRefReader sr(data);
 
@@ -197,14 +241,14 @@ int main(int argc, const char** argv)
 				{
 					pPeer = &peer;
 
-					if (seqId != peer.last_seq_id + 1)
+					if (seqId != peer.last_recv_seq_id + 1)
 					{
 						std::cout << addr.toString() << " - Ignoring out of order packet" << std::endl;
 						return;
 					}
-					peer.last_seq_id = seqId;
+					peer.last_recv_seq_id = seqId;
 
-					//std::cout << addr.toString() << " - Sending ack to peerId=" << peerId << " for seqId=" << peer.last_seq_id << std::endl;
+					//std::cout << addr.toString() << " - Sending ack to peerId=" << peerId << " for seqId=" << peer.last_recv_seq_id << std::endl;
 
 					StringWriter sw;
 					{ uint8_t b = 0xb8; sw.u8(b); }
@@ -239,6 +283,10 @@ int main(int argc, const char** argv)
 				sr = MemoryRefReader(data);
 				pPeer->buffer_expected_size = 0;
 				pPeer->buffer.clear();
+			}
+			else if (unk_byte == 0xC8)
+			{
+				return; // End of data; client only wanted to let us know it acks what we sent.
 			}
 			else
 			{

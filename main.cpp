@@ -1,3 +1,4 @@
+#include <deque>
 #include <iostream>
 
 #include <crc32c.hpp>
@@ -80,9 +81,10 @@ struct HubPeer
 	int8_t rotation;
 	uint8_t zone;
 	uint32_t last_recv_seq_id = 0;
-	uint32_t last_send_seq_id = 0; // TODO: Handle resending if the client doesn't ack.
+	uint32_t last_send_seq_id = 0;
 	uint32_t buffer_expected_size = 0;
 	std::string buffer;
+	std::deque<std::string> pending_reliables;
 
 	void sendBigPacket(Socket& s, const std::string& data)
 	{
@@ -106,7 +108,7 @@ struct HubPeer
 				{ uint8_t b = 0x90; sw.u8(b); }
 				sw.u32_le(total_length);
 				sw.raw((void*)data.data(), 0x493);
-				s.udpServerSend(addr, packData(sw.data));
+				s.udpServerSend(addr, this->pending_reliables.emplace_back(packData(sw.data)));
 			}
 			for (uint32_t offset = 0x493; offset != total_length; )
 			{
@@ -123,10 +125,20 @@ struct HubPeer
 				{ uint8_t b = 0x90; sw.u8(b); }
 				{ uint32_t dw = 0; sw.u32_le(dw); }
 				sw.raw((void*)(data.data() + offset), chunk_size);
-				s.udpServerSend(addr, packData(sw.data));
+				s.udpServerSend(addr, this->pending_reliables.emplace_back(packData(sw.data)));
 
 				offset += chunk_size;
 			}
+		}
+	}
+
+	void resendUnackedPackets(Socket& s)
+	{
+		if (!this->pending_reliables.empty())
+		{
+			const auto seq_id = (this->last_send_seq_id - (this->pending_reliables.size() - 1));
+			//std::cout << addr.toString() << " - Resending reliable packet to peerId=" << this->id << " with seqId=" << this->last_send_seq_id << std::endl;
+			s.udpServerSend(this->addr, this->pending_reliables.front());
 		}
 	}
 
@@ -189,8 +201,6 @@ int main(int argc, const char** argv)
 
 	ServerServiceUdp srv([](Socket& s, SocketAddr&& addr, std::string&& data, ServerServiceUdp&)
 	{
-		//std::cout << "Client says: " << string::bin2hex(data) << std::endl;
-
 		MemoryRefReader sr(data);
 
 		uint8_t compression_byte;
@@ -208,7 +218,7 @@ int main(int argc, const char** argv)
 			sr = MemoryRefReader(data);
 		}
 
-		//std::cout << "Client says: " << string::bin2hex(data) << std::endl;
+		//std::cout << addr.toString() << " > " << string::bin2hex(data) << std::endl;
 
 		uint32_t chksum;
 		sr.u32_be(chksum);
@@ -252,20 +262,30 @@ int main(int argc, const char** argv)
 			sr.u32_le(seqId);
 			sr.u8(unk_byte);
 
+			HubPeer* peer = get_peer_by_id(peerId);
+			if (!peer || peer->addr != addr)
+			{
+				std::cout << addr.toString() << " - Ignoring reliable packet/ack from unknown peer" << std::endl;
+				new_number_who_dis(s, addr);
+				return;
+			}
+
 			if (unk_byte == 0xC8)
 			{
-				//std::cout << addr.toString() << " - Got ack from peerId=" << peerId << " for seqId=" << seqId << std::endl;
+				if (peer->pending_reliables.empty())
+				{
+					std::cout << addr.toString() << " - Unexpected ack from peerId=" << peerId << " for seqId=" << seqId << " (no acks were pending)" << std::endl;
+				}
+				else
+				{
+					//std::cout << addr.toString() << " - Got ack from peerId=" << peerId << " for seqId=" << seqId << std::endl;
+					peer->pending_reliables.pop_front();
+				}
 				return;
 			}
 
 			//std::cout << addr.toString() << " - Reliable packet from peerId=" << peerId << " with seqId=" << seqId << std::endl;
 
-			HubPeer* peer = get_peer_by_id(peerId);
-			if (!peer || peer->addr != addr)
-			{
-				std::cout << addr.toString() << " - Ignoring reliable packet from unknown peer" << std::endl;
-				return;
-			}
 			if (seqId != peer->last_recv_seq_id + 1)
 			{
 				std::cout << addr.toString() << " - Ignoring out of order packet" << std::endl;
@@ -323,6 +343,7 @@ int main(int argc, const char** argv)
 					{
 						ok = true;
 						peer.last_sign_of_life = time::millis();
+						peer.resendUnackedPackets(s);
 
 						sr.i16_le(peer.x);
 						sr.i16_le(peer.y);
@@ -425,6 +446,7 @@ int main(int argc, const char** argv)
 				{
 					//std::cout << addr.toString() << " - Still alive" << std::endl;
 					peer->last_sign_of_life = time::millis();
+					peer->resendUnackedPackets(s);
 
 					StringWriter sw;
 					{ uint8_t b = 0xb4; sw.u8(b); }
@@ -451,6 +473,7 @@ int main(int argc, const char** argv)
 					new_number_who_dis(s, addr);
 					return;
 				}
+				peer->resendUnackedPackets(s);
 
 				uint32_t len;
 				sr.oml(len);

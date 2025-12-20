@@ -52,6 +52,7 @@ enum IncomingMsgIds : uint8_t
 	CMSG_LEAVE = 4, // contains the peer id, e.g. for 77h: 0007F6C91D 00000080 0400 B4 04 7700
 	CMSG_HEARTBEAT = 5,
 	CMSG_CONTROL = 7,
+	CMSG_LOADOUT = 8,
 };
 
 enum OutgoingMsgIds : uint8_t
@@ -73,11 +74,11 @@ struct HubPeer
 	std::string name;
 	std::string acctid;
 	std::string clan_name;
+	std::string loadout;
 	//std::string level;
 	int16_t x, y, z;
 	int8_t rotation;
 	uint8_t zone;
-	uint8_t state = 0; // Need to defer introductions of remote peers a bit otherwise they are ignored.
 	uint32_t last_recv_seq_id = 0;
 	uint32_t last_send_seq_id = 0; // TODO: Handle resending if the client doesn't ack.
 	uint32_t buffer_expected_size = 0;
@@ -139,12 +140,8 @@ struct HubPeer
 		sw.str_lp<u8_t>(this->name);
 		sw.str_lp<u8_t>(this->acctid);
 		sw.str_lp<u8_t>(this->clan_name);
-		std::string loadout;
-		//std::string loadout = R"({"a":{"a":"/Lotus/Powersuits/Ember/Ember"}})";
-		//std::string loadout = R"({"a":{"a":"/Lotus/Powersuits/Ember/Ember","pricol":{"t0":-65326,"t1":-65326,"t2":-65326,"t3":-65326,"m0":-65326,"m1":-65326,"en":-65326},"Skins":["0/Lotus/Upgrades/Skins/Ember/EmberHelmet","1/Lotus/Upgrades/Skins/Armor/WarframeDefaults/EmptyCustomization","2/Lotus/Upgrades/Skins/Armor/WarframeDefaults/EmptyCustomization","5/Lotus/Upgrades/Skins/Fairy/FairyNobleAnims","6/Lotus/Upgrades/Skins/Armor/WarframeDefaults/EmptyCustomization","7/Lotus/Upgrades/Skins/Ember/EmberSkin","8/Lotus/Upgrades/Skins/Armor/WarframeDefaults/EmptyCustomization","9/Lotus/Upgrades/Skins/Armor/WarframeDefaults/EmptyCustomization","10/Lotus/Upgrades/Skins/Armor/WarframeDefaults/EmptyCustomization","11/Lotus/Upgrades/Skins/Armor/WarframeDefaults/EmptyCustomization","15/Lotus/Upgrades/Skins/Ember/EmberEffectsSetDefault"]},"d":{"a":"/Lotus/Weapons/Tenno/Melee/LongSword/LongSword","hiddenWhenHolstered":true,"Skins":["2/Lotus/Upgrades/Skins/HolsterCustomizations/SwordUpperBack"]},"r":51,"syndicateLevelSimple":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"gbt1":0,"gbt2":0,"gbt3":0,"sbt1":0,"sbt2":0,"sbt3":0})";
-		//std::string loadout = R"({"a":{"a":"/Lotus/Powersuits/Wisp/WispPrime","archonCrystalCounts":2113,"pricol":{"t0":-16777216,"t1":-16777216,"t2":-16777216,"t3":-394759,"m0":-13073153,"m1":-10092442,"en":-10092442,"e1":-13073153},"attcol":{"t0":-16777216,"t1":-16777216,"t2":-16777216,"t3":-394759,"m0":-13073153,"m1":-10092442,"en":-13073153,"e1":-10092442},"sigcol":{"e1":-2138275712},"syancol":{"t0":-16777216,"t1":-16777216,"t2":-16777216,"t3":-394759,"m0":-13073153,"m1":-10092442,"en":-10092442,"e1":-13073153},"Skins":["0/Lotus/Upgrades/Skins/Wisp/SWCovenWispHelmet","1/Lotus/Upgrades/Skins/Armor/SentEvoArmor/SentEvoArmor2A","2/Lotus/Upgrades/Skins/Armor/WarframeDefaults/EmptyCustomization","5/Lotus/Upgrades/Skins/Wisp/WispAgileAnims","6/Lotus/Upgrades/Skins/Armor/WarframeDefaults/EmptyCustomization","7/Lotus/Upgrades/Skins/Wisp/WispPrimeSkin","8/Lotus/Upgrades/Skins/Armor/WarframeDefaults/EmptyCustomization","9/Lotus/Upgrades/Skins/Armor/SentEvoArmor/SentEvoArmor2A","10/Lotus/Upgrades/Skins/Armor/WarframeDefaults/EmptyCustomization","11/Lotus/Upgrades/Skins/Wisp/WispPrimeDefaultCape","15/Lotus/Upgrades/Skins/Wisp/WispEffectsSetDefault","16/Lotus/Upgrades/Skins/Effects/Kuva/KuvaLightningEphemera","25/Lotus/Upgrades/Skins/Crowns/LaurelHaloCrown","26/Lotus/Upgrades/Skins/Voices/DefaultWarframeVoiceItem"]},"b":{"a":"/Lotus/Weapons/Tenno/ThrowingWeapons/TnOraxiaFlechette/TnOraxiaFlechette","hiddenWhenHolstered":true,"pricol":{"t0":-394759,"t1":-16777216,"t2":-6544014,"t3":-1650298,"m0":-6544014,"m1":-1658626,"en":-6544014},"Skins":["2/Lotus/Upgrades/Skins/HolsterCustomizations/PistolHipsDual"]},"c":{"a":"/Lotus/Weapons/Grineer/KuvaLich/LongGuns/Tonkor/KuvaTonkor","hiddenWhenHolstered":true,"pricol":{"t0":-16777216,"t1":-16777216,"t2":-16777216,"t3":-394759,"m0":-13073153,"m1":-10092442,"en":-10092442},"Skins":["2/Lotus/Upgrades/Skins/HolsterCustomizations/RifleUpperBack"]},"d":{"a":"/Lotus/Weapons/Tenno/Melee/Polearms/PrimeGuandao/PrimeGuandaoWeapon","pricol":{"t0":-16777216,"t1":-16777216,"t2":-16777216,"t3":-1577993,"m0":-394759,"m1":-394759,"en":-394759,"e1":-394759},"Skins":["2/Lotus/Upgrades/Skins/HolsterCustomizations/StaffCrossed"]},"r":30,"syndicateLevelSimple":[0,0,1,1,1,0,0,0,1,1,0,1,1,1,0,0,0,0,0,1,1,0,1,1,1,1,1,1,0,0,1,1,1,1,1,1,1,1],"gbt1":0,"gbt2":0,"gbt3":0,"sbt1":0,"sbt2":0,"sbt3":0})";
-		sw.oml(loadout.size());
-		sw.str(loadout.size(), loadout.data());
+		sw.oml(this->loadout.size());
+		sw.str(this->loadout.size(), this->loadout.data());
 		sw.skip(4); // unk
 		other.sendBigPacket(s, sw.data);
 	}
@@ -333,22 +330,6 @@ int main(int argc, const char** argv)
 								s.udpServerSend(other.addr, packData(sw.data));
 							}
 						}
-
-						if (peer.state == 0)
-						{
-							peer.state = 1;
-						}
-						else if (peer.state == 1)
-						{
-							peer.state = 2;
-							for (auto& other : peers)
-							{
-								if (peer.id != other.id)
-								{
-									other.introduceTo(peer, s);
-								}
-							}
-						}
 						break;
 					}
 				}
@@ -393,14 +374,6 @@ int main(int argc, const char** argv)
 				s.udpServerSend(addr, packData(sw.data));
 
 				std::cout << addr.toString() << " - " << peer.name << " (" << peer.acctid << ") is joining, assigned id " << peer.id << std::endl;
-
-				for (auto& other : peers)
-				{
-					if (other.id != peer.id)
-					{
-						peer.introduceTo(other, s);
-					}
-				}
 			}
 			break;
 
@@ -471,6 +444,35 @@ int main(int argc, const char** argv)
 						peer.last_sign_of_life = time::millis();
 					}
 				}
+			}
+			break;
+
+		case CMSG_LOADOUT:
+			{
+				uint16_t peerId;
+				sr.u16_le(peerId);
+
+				for (auto& peer : peers)
+				{
+					if (peer.id == peerId)
+					{
+						uint32_t len;
+						sr.oml(len);
+						sr.str(len, peer.loadout);
+
+						for (auto& other : peers)
+						{
+							if (peer.id != other.id)
+							{
+								other.introduceTo(peer, s);
+								peer.introduceTo(other, s);
+							}
+						}
+
+						break;
+					}
+				}
+				
 			}
 			break;
 

@@ -170,7 +170,9 @@ struct HubPeer
 		sw.str_lp<u8_t>(this->clan_name);
 		sw.oml(this->loadout.size());
 		sw.str(this->loadout.size(), this->loadout.data());
-		sw.skip(4); // unk
+		sw.skip(1);
+		sw.u8(this->zone);
+		sw.skip(2);
 		other.sendBigPacket(s, sw.data);
 	}
 };

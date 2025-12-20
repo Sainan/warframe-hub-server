@@ -1,7 +1,7 @@
 # warframe-hub-server
 
-This is a research project with the goal of implementing a fully-functioning HUB server.
+Source-available implementation of a Warframe HUB server (used for relays & dojos).
 
-## But what good is a research project for me when I'm only a lazy end user?
+## Usage
 
-Well, luckily for you, this server is already capable of affirming a client's join, which provides the insane value of allowing ~~tarot~~ prex cards to spawn.
+On localhost, it should just work. For remote peers, you'll want to make sure that `"dtls"` is 0 or absent in SpaceNinjaServer's config.json.

@@ -151,6 +151,18 @@ struct HubPeer
 static std::vector<HubPeer> peers;
 static uint16_t next_peer_id = 1;
 
+static HubPeer* get_peer_by_id(uint16_t id)
+{
+	for (auto& peer : peers)
+	{
+		if (peer.id == id)
+		{
+			return &peer;
+		}
+	}
+	return nullptr;
+}
+
 static void broadcast_kick(Socket& s, uint16_t peerId)
 {
 	StringWriter sw;
@@ -240,54 +252,45 @@ int main(int argc, const char** argv)
 
 			//std::cout << addr.toString() << " - Reliable packet from peerId=" << peerId << " with seqId=" << seqId << std::endl;
 
-			HubPeer* pPeer = nullptr;
-			for (auto& peer : peers)
-			{
-				if (peer.id == peerId)
-				{
-					pPeer = &peer;
-
-					if (seqId != peer.last_recv_seq_id + 1)
-					{
-						std::cout << addr.toString() << " - Ignoring out of order packet" << std::endl;
-						return;
-					}
-					peer.last_recv_seq_id = seqId;
-
-					//std::cout << addr.toString() << " - Sending ack to peerId=" << peerId << " for seqId=" << peer.last_recv_seq_id << std::endl;
-
-					StringWriter sw;
-					{ uint8_t b = 0xb8; sw.u8(b); }
-					sw.u16_le(peerId);
-					sw.u32_le(seqId);
-					{ uint8_t b = 0xc8; sw.u8(b); }
-					s.udpServerSend(addr, packData(sw.data));
-				}
-			}
-			if (!pPeer)
+			HubPeer* peer = get_peer_by_id(peerId);
+			if (!peer)
 			{
 				std::cout << addr.toString() << " - Ignoring reliable packet from unknown peer" << std::endl;
 				return;
 			}
+			if (seqId != peer->last_recv_seq_id + 1)
+			{
+				std::cout << addr.toString() << " - Ignoring out of order packet" << std::endl;
+				return;
+			}
+			peer->last_recv_seq_id = seqId;
+
+			//std::cout << addr.toString() << " - Sending ack to peerId=" << peerId << " for seqId=" << peer.last_recv_seq_id << std::endl;
+			StringWriter sw;
+			{ uint8_t b = 0xb8; sw.u8(b); }
+			sw.u16_le(peerId);
+			sw.u32_le(seqId);
+			{ uint8_t b = 0xc8; sw.u8(b); }
+			s.udpServerSend(addr, packData(sw.data));
 
 			if (unk_byte == 0x90)
 			{
 				uint32_t total_length;
 				sr.u32_le(total_length);
-				pPeer->buffer.append(data.data() + sr.getPosition(), data.size() - sr.getPosition());
+				peer->buffer.append(data.data() + sr.getPosition(), data.size() - sr.getPosition());
 				if (total_length != 0)
 				{
-					pPeer->buffer_expected_size = total_length;
+					peer->buffer_expected_size = total_length;
 					return;
 				}
-				if (pPeer->buffer.size() < pPeer->buffer_expected_size)
+				if (peer->buffer.size() < peer->buffer_expected_size)
 				{
 					return;
 				}
-				data = std::move(pPeer->buffer);
+				data = std::move(peer->buffer);
 				sr = MemoryRefReader(data);
-				pPeer->buffer_expected_size = 0;
-				pPeer->buffer.clear();
+				peer->buffer_expected_size = 0;
+				peer->buffer.clear();
 			}
 			else
 			{
@@ -404,21 +407,16 @@ int main(int argc, const char** argv)
 			{
 				uint16_t peerId;
 				sr.u16_le(peerId);
-				for (auto& peer : peers)
+				if (auto peer = get_peer_by_id(peerId))
 				{
-					if (peer.id == peerId)
-					{
-						//std::cout << addr.toString() << " - Still alive" << std::endl;
-						peer.last_sign_of_life = time::millis();
+					//std::cout << addr.toString() << " - Still alive" << std::endl;
+					peer->last_sign_of_life = time::millis();
 
-						StringWriter sw;
-						{ uint8_t b = 0xb4; sw.u8(b); }
-						{ uint8_t b = HMSG_HEARTBEAT; sw.u8(b); }
-						sw.u16_le(peerId);
-						s.udpServerSend(addr, packData(sw.data));
-
-						break;
-					}
+					StringWriter sw;
+					{ uint8_t b = 0xb4; sw.u8(b); }
+					{ uint8_t b = HMSG_HEARTBEAT; sw.u8(b); }
+					sw.u16_le(peerId);
+					s.udpServerSend(addr, packData(sw.data));
 				}
 			}
 			break;
@@ -429,14 +427,9 @@ int main(int argc, const char** argv)
 				sr.u16_le(peerId);
 
 				std::string_view level;
-				for (auto& peer : peers)
+				if (auto peer = get_peer_by_id(peerId))
 				{
-					if (peer.id == peerId)
-					{
-						peer.last_sign_of_life = time::millis();
-						level = peer.level;
-						break;
-					}
+					level = peer->level;
 				}
 
 				uint32_t len;
@@ -466,28 +459,21 @@ int main(int argc, const char** argv)
 			{
 				uint16_t peerId;
 				sr.u16_le(peerId);
-
-				for (auto& peer : peers)
+				if (auto peer = get_peer_by_id(peerId))
 				{
-					if (peer.id == peerId)
+					uint32_t len;
+					sr.oml(len);
+					sr.str(len, peer->loadout);
+
+					for (auto& other : peers)
 					{
-						uint32_t len;
-						sr.oml(len);
-						sr.str(len, peer.loadout);
-
-						for (auto& other : peers)
+						if (peer->id != other.id && peer->level == other.level)
 						{
-							if (peer.id != other.id && peer.level == other.level)
-							{
-								other.introduceTo(peer, s);
-								peer.introduceTo(other, s);
-							}
+							other.introduceTo(*peer, s);
+							peer->introduceTo(other, s);
 						}
-
-						break;
 					}
 				}
-				
 			}
 			break;
 

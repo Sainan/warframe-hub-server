@@ -49,6 +49,7 @@ using namespace soup;
 enum IncomingMsgIds : uint8_t
 {
 	CMSG_MOVE = 0,
+	CMSG_ZONE_PAIRS = 1,
 	CMSG_JOIN = 3,
 	CMSG_LEAVE = 4, // contains the peer id, e.g. for 77h: 0007F6C91D 00000080 0400 B4 04 7700
 	CMSG_HEARTBEAT = 5,
@@ -59,11 +60,13 @@ enum IncomingMsgIds : uint8_t
 enum OutgoingMsgIds : uint8_t
 {
 	HMSG_MOVE = 0,
+	HMSG_ZONE_PAIRS = 1,
 	HMSG_PEER_INFO = 2,
 	HMSG_JOIN = 3,
 	HMSG_KICK = 4,
 	HMSG_HEARTBEAT = 5,
 	HMSG_CONTROL = 7,
+	HMSG_HIDE_PEER = 9,
 };
 
 struct HubPeer
@@ -77,6 +80,7 @@ struct HubPeer
 	std::string clan_name;
 	std::string loadout;
 	std::string level;
+	std::vector<std::pair<uint8_t, uint8_t>> zone_pairs;
 	int16_t x, y, z;
 	int8_t rotation;
 	uint8_t zone;
@@ -174,6 +178,35 @@ struct HubPeer
 		sw.u8(this->zone);
 		sw.skip(2);
 		other.sendBigPacket(s, sw.data);
+	}
+
+	bool canSeeZone(uint8_t zone) const noexcept
+	{
+		if (zone == this->zone)
+		{
+			return true;
+		}
+		for (const auto& zp : zone_pairs)
+		{
+			if ((zp.first == zone && zp.second == this->zone) || (zp.first == this->zone && zp.second == zone))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	void sendPositionTo(HubPeer& other, Socket& s)
+	{
+		StringWriter sw;
+		{ uint8_t b = 0xb4; sw.u8(b); }
+		{ uint8_t b = HMSG_MOVE; sw.u8(b); }
+		sw.u16_le(this->id);
+		sw.i16_le(this->x);
+		sw.i16_le(this->y);
+		sw.i16_le(this->z);
+		sw.i8(this->rotation);
+		s.udpServerSend(other.addr, packData(sw.data));
 	}
 };
 static std::vector<HubPeer> peers;
@@ -361,11 +394,40 @@ int main(int argc, const char** argv)
 						peer.last_sign_of_life = time::millis();
 						peer.resendUnackedPackets(s);
 
+						const auto old_zone = peer.zone;
 						sr.i16_le(peer.x);
 						sr.i16_le(peer.y);
 						sr.i16_le(peer.z);
 						sr.i8(peer.rotation);
 						sr.u8(peer.zone);
+
+						if (peer.zone != old_zone)
+						{
+							//std::cout << addr.toString() << " - Moved into zone " << (int)peer.zone << std::endl;
+
+							// The client will have already hidden all peers it can no longer see now, but we still have to:
+							for (auto& other : peers)
+							{
+								if (peer.id != other.id && peer.level == other.level)
+								{
+									// Inform the client of peers it can now see.
+									if (peer.canSeeZone(other.zone))
+									{
+										other.sendPositionTo(peer, s);
+									}
+
+									// Inform peers who can no longer see this client.
+									if (!other.canSeeZone(peer.zone))
+									{
+										StringWriter sw;
+										{ uint8_t b = 0xb4; sw.u8(b); }
+										{ uint8_t b = HMSG_HIDE_PEER; sw.u8(b); }
+										sw.u16_le(peer.id);
+										s.udpServerSend(other.addr, packData(sw.data));
+									}
+								}
+							}
+						}
 
 						StringWriter sw;
 						{ uint8_t b = 0xb4; sw.u8(b); }
@@ -377,7 +439,7 @@ int main(int argc, const char** argv)
 						sw.i8(peer.rotation);
 						for (auto& other : peers)
 						{
-							if (peer.id != other.id && peer.level == other.level)
+							if (peer.id != other.id && peer.level == other.level && other.canSeeZone(peer.zone))
 							{
 								s.udpServerSend(other.addr, packData(sw.data));
 							}
@@ -389,6 +451,28 @@ int main(int argc, const char** argv)
 				{
 					std::cout << addr.toString() << " - CMSG_MOVE from unknown peer, asking them to rejoin" << std::endl;
 					new_number_who_dis(s, addr);
+				}
+			}
+			break;
+
+		case CMSG_ZONE_PAIRS:
+			for (auto& peer : peers)
+			{
+				if (peer.addr == addr)
+				{
+					peer.zone_pairs.clear();
+					peer.zone_pairs.reserve((data.size() - sr.getPosition()) / 2 - 1);
+					uint8_t lo, hi;
+					while (true)
+					{
+						sr.u8(lo);
+						sr.u8(hi);
+						if (lo == 0xff && hi == 0xff)
+						{
+							break;
+						}
+						peer.zone_pairs.emplace_back(lo, hi);
+					}
 				}
 			}
 			break;
@@ -429,11 +513,21 @@ int main(int argc, const char** argv)
 				sr.str_lp<u8_t>(peer.clan_name);
 				sr.str_lp<u8_t>(peer.level);
 
-				StringWriter sw;
-				{ uint8_t b = 0xb4; sw.u8(b); }
-				{ uint8_t b = HMSG_JOIN; sw.u8(b); }
-				sw.u16_le(peer.id);
-				s.udpServerSend(addr, packData(sw.data));
+				{
+					StringWriter sw;
+					{ uint8_t b = 0xb4; sw.u8(b); }
+					{ uint8_t b = HMSG_JOIN; sw.u8(b); }
+					sw.u16_le(peer.id);
+					s.udpServerSend(addr, packData(sw.data));
+				}
+
+				{
+					StringWriter sw;
+					{ uint8_t b = 0xb4; sw.u8(b); }
+					{ uint8_t b = HMSG_ZONE_PAIRS; sw.u8(b); }
+					sw.str_lp<u8_t>(peer.level);
+					s.udpServerSend(addr, packData(sw.data));
+				}
 
 				std::cout << addr.toString() << " - " << peer.name << " (" << peer.acctid << ") is joining, assigned id " << peer.id << std::endl;
 			}

@@ -149,7 +149,6 @@ struct HubPeer
 	}
 };
 static std::vector<HubPeer> peers;
-static uint16_t next_peer_id = 1;
 
 static HubPeer* get_peer_by_id(uint16_t id)
 {
@@ -372,7 +371,17 @@ int main(int argc, const char** argv)
 					}
 				}
 
-				auto& peer = peers.emplace_back(HubPeer{ addr, next_peer_id++, time::millis() });
+				uint16_t peerId = 0;
+				while (get_peer_by_id(peerId))
+				{
+					if (++peerId == 0xFFFF)
+					{
+						std::cout << addr.toString() << " - Attempted join but we're at capacity" << std::endl;
+						return;
+					}
+				}
+
+				auto& peer = peers.emplace_back(HubPeer{ addr, peerId, time::millis() });
 				sr.str_lp<u8_t>(peer.acctid);
 				sr.i16_le(peer.x);
 				sr.i16_le(peer.y);

@@ -261,7 +261,7 @@ int main(int argc, const char** argv)
 			//std::cout << addr.toString() << " - Reliable packet from peerId=" << peerId << " with seqId=" << seqId << std::endl;
 
 			HubPeer* peer = get_peer_by_id(peerId);
-			if (!peer)
+			if (!peer || peer->addr != addr)
 			{
 				std::cout << addr.toString() << " - Ignoring reliable packet from unknown peer" << std::endl;
 				return;
@@ -421,7 +421,7 @@ int main(int argc, const char** argv)
 			{
 				uint16_t peerId;
 				sr.u16_le(peerId);
-				if (auto peer = get_peer_by_id(peerId))
+				if (auto peer = get_peer_by_id(peerId); peer && peer->addr == addr)
 				{
 					//std::cout << addr.toString() << " - Still alive" << std::endl;
 					peer->last_sign_of_life = time::millis();
@@ -445,7 +445,7 @@ int main(int argc, const char** argv)
 				uint16_t peerId;
 				sr.u16_le(peerId);
 				auto peer = get_peer_by_id(peerId);
-				if (!peer)
+				if (!peer || peer->addr != addr)
 				{
 					std::cout << addr.toString() << " - CMSG_CONTROL from unknown peer, asking them to rejoin" << std::endl;
 					new_number_who_dis(s, addr);
@@ -479,7 +479,7 @@ int main(int argc, const char** argv)
 			{
 				uint16_t peerId;
 				sr.u16_le(peerId);
-				if (auto peer = get_peer_by_id(peerId))
+				if (auto peer = get_peer_by_id(peerId); peer && peer->addr == addr)
 				{
 					uint32_t len;
 					sr.oml(len);

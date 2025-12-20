@@ -366,7 +366,11 @@ int main(int argc, const char** argv)
 
 				auto& peer = peers.emplace_back(HubPeer{ addr, next_peer_id++, time::millis() });
 				sr.str_lp<u8_t>(peer.acctid);
-				sr.skip(8); // unk
+				sr.i16_le(peer.x);
+				sr.i16_le(peer.y);
+				sr.i16_le(peer.z);
+				sr.i8(peer.rotation);
+				sr.u8(peer.zone);
 				sr.str_lp<u8_t>(peer.name);
 				sr.str_lp<u8_t>(peer.clan_name);
 				//sr.str_lp<u8_t>(peer.level);

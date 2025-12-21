@@ -52,7 +52,7 @@ enum IncomingMsgIds : uint8_t
 	CMSG_MOVE = 0,
 	CMSG_ZONE_PAIRS = 1,
 	CMSG_JOIN = 3,
-	CMSG_LEAVE = 4, // contains the peer id, e.g. for 77h: 0007F6C91D 00000080 0400 B4 04 7700
+	CMSG_LEAVE = 4,
 	CMSG_HEARTBEAT = 5,
 	CMSG_CONTROL = 7,
 	CMSG_LOADOUT = 8,
@@ -575,16 +575,22 @@ int main(int argc, const char** argv)
 			break;
 
 		case CMSG_LEAVE:
-			for (auto i = peers.begin(); i != peers.end(); )
 			{
-				if (i->addr == addr || time::millisSince(i->last_sign_of_life) > 30'000)
+				uint16_t peerId;
+				sr.u16_le(peerId);
+				std::cout << addr.toString() << " - Leaving, peerId=" << peerId << std::endl;
+
+				for (auto i = peers.begin(); i != peers.end(); )
 				{
-					broadcast_kick(s, i->id);
-					i = peers.erase(i);
-				}
-				else
-				{
-					++i;
+					if (i->addr == addr || time::millisSince(i->last_sign_of_life) > 30'000)
+					{
+						broadcast_kick(s, i->id);
+						i = peers.erase(i);
+					}
+					else
+					{
+						++i;
+					}
 				}
 			}
 			break;

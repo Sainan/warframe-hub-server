@@ -182,7 +182,10 @@ struct HubPeer
 		sw.skip(2);
 		other.sendBigPacket(s, sw.data);
 
-		this->sendStatusTo(other, s);
+		if (other.canSeeZone(this->zone))
+		{
+			this->sendStatusTo(other, s);
+		}
 	}
 
 	bool canSeeZone(uint8_t zone) const noexcept
@@ -220,7 +223,16 @@ struct HubPeer
 		{
 			//std::cout << other.addr.toString() << " - Sending status of peerId=" << this->id << std::endl;
 
-			/*{
+			{
+				StringWriter sw;
+				{ uint8_t b = HMSG_CONTROL; sw.u8(b); }
+				sw.u16_le(this->id);
+				sw.oml(this->status.size());
+				sw.str(this->status.size(), this->status.data());
+				other.sendReliablePacket(s, sw.data);
+			}
+
+			{
 				auto msg = soup::make_unique<JsonObject>();
 				msg->add("emote", "");
 
@@ -231,13 +243,12 @@ struct HubPeer
 				auto data = obj.encode();
 
 				StringWriter sw;
-				{ uint8_t b = 0xb4; sw.u8(b); }
 				{ uint8_t b = HMSG_CONTROL; sw.u8(b); }
 				sw.u16_le(this->id);
 				sw.oml(data.size());
 				sw.str(data.size(), data.data());
-				s.udpServerSend(other.addr, packData(sw.data, other.salt));
-			}*/
+				other.sendReliablePacket(s, sw.data);
+			}
 
 			{
 				StringWriter sw;

@@ -18,11 +18,10 @@
 
 using namespace soup;
 
-[[nodiscard]] static std::string addHeader(const std::string& data)
+[[nodiscard]] static std::string addHeader(const std::string& data, const std::string_view& salt)
 {
 	uint32_t initial = crc32c::hash((const uint8_t*)data.data(), data.size());
-	uint32_t hash = crc32c::hash((const uint8_t*)"b471e49539930dc9b5a131e6247c7387G", 33, initial); // < U41
-	//uint32_t hash = crc32c::hash((const uint8_t*)"b471e49539930dc9b5a131e6247c7387H", 33, initial); // >=U41
+	uint32_t hash = crc32c::hash((const uint8_t*)salt.data(), salt.size(), initial);
 
 	StringWriter sw;
 
@@ -35,7 +34,7 @@ using namespace soup;
 	return sw.data + data;
 }
 
-[[nodiscard]] static std::string packData(const std::string& data)
+[[nodiscard]] static std::string packData(const std::string& data, const std::string_view& salt)
 {
 	StringWriter sw;
 
@@ -44,7 +43,7 @@ using namespace soup;
 
 	sw.str_lp<u16_le_t>(data);
 
-	return addHeader(sw.data);
+	return addHeader(sw.data, salt);
 }
 
 enum IncomingMsgIds : uint8_t
@@ -76,6 +75,7 @@ struct HubPeer
 	uint16_t id;
 	//time_t connected_at;
 	time_t last_sign_of_life; // Connections that had no traffic in 30 seconds time out.
+	std::string_view salt;
 	std::string name;
 	std::string acctid;
 	std::string clan_name;
@@ -94,7 +94,7 @@ struct HubPeer
 	void sendReliablePacket(Socket& s, const std::string& data)
 	{
 		++this->last_send_seq_id;
-		std::cout << addr.toString() << " - Sending reliable packet to peerId=" << this->id << " with seqId=" << this->last_send_seq_id << std::endl;
+		std::cout << this->addr.toString() << " - Sending reliable packet to peerId=" << this->id << " with seqId=" << this->last_send_seq_id << std::endl;
 
 		StringWriter sw;
 		{ uint8_t b = 0xb8; sw.u8(b); }
@@ -102,7 +102,7 @@ struct HubPeer
 		sw.u32_le(this->last_send_seq_id);
 		{ uint8_t b = 0xCC; sw.u8(b); }
 		sw.raw((void*)data.data(), data.size());
-		s.udpServerSend(addr, this->pending_reliables.emplace_back(packData(sw.data)));
+		s.udpServerSend(addr, this->pending_reliables.emplace_back(packData(sw.data, this->salt)));
 	}
 
 	void sendBigPacket(Socket& s, const std::string& data)
@@ -111,14 +111,14 @@ struct HubPeer
 		{
 			StringWriter sw;
 			{ uint8_t b = 0xb4; sw.u8(b); }
-			s.udpServerSend(addr, packData(sw.data + data));
+			s.udpServerSend(this->addr, packData(sw.data + data, this->salt));
 		}
 		else
 		{
 			uint32_t total_length = static_cast<uint32_t>(data.size());
 			{
 				++this->last_send_seq_id;
-				std::cout << addr.toString() << " - Sending reliable packet to peerId=" << this->id << " with seqId=" << this->last_send_seq_id << std::endl;
+				std::cout << this->addr.toString() << " - Sending reliable packet to peerId=" << this->id << " with seqId=" << this->last_send_seq_id << std::endl;
 
 				StringWriter sw;
 				{ uint8_t b = 0xb8; sw.u8(b); }
@@ -127,7 +127,7 @@ struct HubPeer
 				{ uint8_t b = 0x90; sw.u8(b); }
 				sw.u32_le(total_length);
 				sw.raw((void*)data.data(), 0x493);
-				s.udpServerSend(addr, this->pending_reliables.emplace_back(packData(sw.data)));
+				s.udpServerSend(this->addr, this->pending_reliables.emplace_back(packData(sw.data, this->salt)));
 			}
 			for (uint32_t offset = 0x493; offset != total_length; )
 			{
@@ -135,7 +135,7 @@ struct HubPeer
 				uint32_t chunk_size = remaining_bytes > 0x493 ? 0x493 : remaining_bytes;
 
 				++this->last_send_seq_id;
-				std::cout << addr.toString() << " - Sending reliable packet to peerId=" << this->id << " with seqId=" << this->last_send_seq_id << std::endl;
+				std::cout << this->addr.toString() << " - Sending reliable packet to peerId=" << this->id << " with seqId=" << this->last_send_seq_id << std::endl;
 
 				StringWriter sw;
 				{ uint8_t b = 0xb8; sw.u8(b); }
@@ -144,7 +144,7 @@ struct HubPeer
 				{ uint8_t b = 0x90; sw.u8(b); }
 				{ uint32_t dw = 0; sw.u32_le(dw); }
 				sw.raw((void*)(data.data() + offset), chunk_size);
-				s.udpServerSend(addr, this->pending_reliables.emplace_back(packData(sw.data)));
+				s.udpServerSend(this->addr, this->pending_reliables.emplace_back(packData(sw.data, this->salt)));
 
 				offset += chunk_size;
 			}
@@ -207,7 +207,7 @@ struct HubPeer
 		sw.i16_le(this->y);
 		sw.i16_le(this->z);
 		sw.i8(this->rotation);
-		s.udpServerSend(other.addr, packData(sw.data));
+		s.udpServerSend(other.addr, packData(sw.data, other.salt));
 	}
 };
 static std::vector<HubPeer> peers;
@@ -224,13 +224,13 @@ static HubPeer* get_peer_by_id(uint16_t id)
 	return nullptr;
 }
 
-static void new_number_who_dis(Socket& s, SocketAddr& addr)
+static void new_number_who_dis(Socket& s, SocketAddr& addr, const std::string_view& salt)
 {
 	StringWriter sw;
 	{ uint8_t b = 0xb4; sw.u8(b); }
 	{ uint8_t b = HMSG_KICK; sw.u8(b); }
 	{ uint16_t b = 0xFFFF; sw.u16_le(b); }
-	s.udpServerSend(addr, packData(sw.data));
+	s.udpServerSend(addr, packData(sw.data, salt));
 }
 
 static void broadcast_kick(Socket& s, uint16_t peerId)
@@ -241,7 +241,7 @@ static void broadcast_kick(Socket& s, uint16_t peerId)
 	sw.u16_le(peerId);
 	for (const auto& peer : peers)
 	{
-		s.udpServerSend(peer.addr, packData(sw.data));
+		s.udpServerSend(peer.addr, packData(sw.data, peer.salt));
 	}
 }
 
@@ -274,24 +274,23 @@ int main(int argc, const char** argv)
 		sr.u32_be(chksum);
 		//std::cout << "Recvd chksum: " << chksum << std::endl;
 
-		uint32_t initial = crc32c::hash((const uint8_t*)data.data() + 5, data.size() - 5, 0);
-		uint32_t hash = crc32c::hash((const uint8_t*)"b471e49539930dc9b5a131e6247c7387G", 33, initial); // < U41
-		//uint32_t hash = crc32c::hash((const uint8_t*)"b471e49539930dc9b5a131e6247c7387H", 33, initial); // >=U41
-		//std::cout << "Calcd chksum: " << hash << std::endl;
-
-		/*if (chksum != hash)
+		uint32_t initial = crc32c::hash((const uint8_t*)data.data() + sr.getPosition(), data.size() - sr.getPosition(), 0);
+		std::string_view salt = "b471e49539930dc9b5a131e6247c7387G";
+		if (crc32c::hash((const uint8_t*)salt.data(), salt.size(), initial) != chksum)
 		{
 			std::cout << addr.toString() << " - Checksum mismatch" << std::endl;
 			return;
-		}*/
+		}
 
-		uint32_t magic;
-		sr.u32_be(magic);
-		//std::cout << "Magic: " << magic << std::endl;
-		if (magic != 0x80)
 		{
-			std::cout << addr.toString() << " - Invalid magic" << std::endl;
-			return;
+			uint32_t magic;
+			sr.u32_be(magic);
+			//std::cout << "Magic: " << magic << std::endl;
+			if (magic != 0x80)
+			{
+				std::cout << addr.toString() << " - Invalid magic" << std::endl;
+				return;
+			}
 		}
 
 		{
@@ -316,7 +315,7 @@ int main(int argc, const char** argv)
 			if (!peer || peer->addr != addr)
 			{
 				std::cout << addr.toString() << " - Ignoring reliable packet/ack from unknown peer" << std::endl;
-				new_number_who_dis(s, addr);
+				new_number_who_dis(s, addr, salt);
 				return;
 			}
 
@@ -349,7 +348,7 @@ int main(int argc, const char** argv)
 			sw.u16_le(peerId);
 			sw.u32_le(seqId);
 			{ uint8_t b = 0xc8; sw.u8(b); }
-			s.udpServerSend(addr, packData(sw.data));
+			s.udpServerSend(addr, packData(sw.data, salt));
 
 			if (unk_byte == 0x90)
 			{
@@ -424,7 +423,7 @@ int main(int argc, const char** argv)
 										{ uint8_t b = 0xb4; sw.u8(b); }
 										{ uint8_t b = HMSG_HIDE_PEER; sw.u8(b); }
 										sw.u16_le(peer.id);
-										s.udpServerSend(other.addr, packData(sw.data));
+										s.udpServerSend(other.addr, packData(sw.data, other.salt));
 									}
 								}
 							}
@@ -442,7 +441,7 @@ int main(int argc, const char** argv)
 						{
 							if (peer.id != other.id && peer.level == other.level && other.canSeeZone(peer.zone))
 							{
-								s.udpServerSend(other.addr, packData(sw.data));
+								s.udpServerSend(other.addr, packData(sw.data, other.salt));
 							}
 						}
 						break;
@@ -451,7 +450,7 @@ int main(int argc, const char** argv)
 				if (!ok)
 				{
 					std::cout << addr.toString() << " - CMSG_MOVE from unknown peer, asking them to rejoin" << std::endl;
-					new_number_who_dis(s, addr);
+					new_number_who_dis(s, addr, salt);
 				}
 			}
 			break;
@@ -503,7 +502,7 @@ int main(int argc, const char** argv)
 					}
 				}
 
-				auto& peer = peers.emplace_back(HubPeer{ addr, peerId, time::millis() });
+				auto& peer = peers.emplace_back(HubPeer{ addr, peerId, time::millis(), salt });
 				sr.str_lp<u8_t>(peer.acctid);
 				sr.i16_le(peer.x);
 				sr.i16_le(peer.y);
@@ -519,7 +518,7 @@ int main(int argc, const char** argv)
 					{ uint8_t b = 0xb4; sw.u8(b); }
 					{ uint8_t b = HMSG_JOIN; sw.u8(b); }
 					sw.u16_le(peer.id);
-					s.udpServerSend(addr, packData(sw.data));
+					s.udpServerSend(addr, packData(sw.data, salt));
 				}
 
 				{
@@ -527,10 +526,10 @@ int main(int argc, const char** argv)
 					{ uint8_t b = 0xb4; sw.u8(b); }
 					{ uint8_t b = HMSG_ZONE_PAIRS; sw.u8(b); }
 					sw.str_lp<u8_t>(peer.level);
-					s.udpServerSend(addr, packData(sw.data));
+					s.udpServerSend(addr, packData(sw.data, salt));
 				}
 
-				std::cout << addr.toString() << " - " << peer.name << " (" << peer.acctid << ") is joining, assigned id " << peer.id << std::endl;
+				std::cout << addr.toString() << " - " << peer.name << " (" << peer.acctid << ", " << peer.clan_name << ") is joining " << peer.level << ", zone " << (int)peer.zone << ", assigned id " << peer.id << std::endl;
 			}
 			break;
 
@@ -563,12 +562,12 @@ int main(int argc, const char** argv)
 					{ uint8_t b = 0xb4; sw.u8(b); }
 					{ uint8_t b = HMSG_HEARTBEAT; sw.u8(b); }
 					sw.u16_le(peerId);
-					s.udpServerSend(addr, packData(sw.data));
+					s.udpServerSend(addr, packData(sw.data, salt));
 				}
 				else
 				{
 					std::cout << addr.toString() << " - CMSG_HEARTBEAT from unknown peer, asking them to rejoin" << std::endl;
-					new_number_who_dis(s, addr);
+					new_number_who_dis(s, addr, salt);
 				}
 			}
 			break;
@@ -581,7 +580,7 @@ int main(int argc, const char** argv)
 				if (!peer || peer->addr != addr)
 				{
 					std::cout << addr.toString() << " - CMSG_CONTROL from unknown peer, asking them to rejoin" << std::endl;
-					new_number_who_dis(s, addr);
+					new_number_who_dis(s, addr, salt);
 					return;
 				}
 				peer->resendUnackedPackets(s);
@@ -618,7 +617,7 @@ int main(int argc, const char** argv)
 						{
 							if (other.id != peerId && other.level == peer->level)
 							{
-								s.udpServerSend(other.addr, packData(sw.data));
+								s.udpServerSend(other.addr, packData(sw.data, other.salt));
 							}
 						}
 					}
@@ -648,7 +647,7 @@ int main(int argc, const char** argv)
 				else
 				{
 					std::cout << addr.toString() << " - CMSG_LOADOUT from unknown peer, asking them to rejoin" << std::endl;
-					new_number_who_dis(s, addr);
+					new_number_who_dis(s, addr, salt);
 				}
 			}
 			break;

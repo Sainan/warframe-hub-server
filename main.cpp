@@ -81,6 +81,7 @@ struct HubPeer
 	std::string clan_name;
 	std::string loadout;
 	std::string level;
+	std::string status;
 	std::vector<std::pair<uint8_t, uint8_t>> zone_pairs;
 	int16_t x, y, z;
 	int8_t rotation;
@@ -179,6 +180,8 @@ struct HubPeer
 		sw.u8(this->zone);
 		sw.skip(2);
 		other.sendBigPacket(s, sw.data);
+
+		this->sendStatusTo(other, s);
 	}
 
 	bool canSeeZone(uint8_t zone) const noexcept
@@ -208,6 +211,43 @@ struct HubPeer
 		sw.i16_le(this->z);
 		sw.i8(this->rotation);
 		s.udpServerSend(other.addr, packData(sw.data, other.salt));
+	}
+
+	void sendStatusTo(HubPeer& other, Socket& s)
+	{
+		if (!this->status.empty())
+		{
+			//std::cout << other.addr.toString() << " - Sending status of peerId=" << this->id << std::endl;
+
+			/*{
+				auto msg = soup::make_unique<JsonObject>();
+				msg->add("emote", "");
+
+				JsonObject obj;
+				obj.add("from", this->acctid);
+				obj.add("to", "zone");
+				obj.add("msg", std::move(msg));
+				auto data = obj.encode();
+
+				StringWriter sw;
+				{ uint8_t b = 0xb4; sw.u8(b); }
+				{ uint8_t b = HMSG_CONTROL; sw.u8(b); }
+				sw.u16_le(this->id);
+				sw.oml(data.size());
+				sw.str(data.size(), data.data());
+				s.udpServerSend(other.addr, packData(sw.data, other.salt));
+			}*/
+
+			{
+				StringWriter sw;
+				{ uint8_t b = 0xb4; sw.u8(b); }
+				{ uint8_t b = HMSG_CONTROL; sw.u8(b); }
+				sw.u16_le(this->id);
+				sw.oml(this->status.size());
+				sw.str(this->status.size(), this->status.data());
+				s.udpServerSend(other.addr, packData(sw.data, other.salt));
+			}
+		}
 	}
 };
 static std::vector<HubPeer> peers;
@@ -403,7 +443,7 @@ int main(int argc, const char** argv)
 
 						if (peer.zone != old_zone)
 						{
-							//std::cout << addr.toString() << " - Moved into zone " << (int)peer.zone << std::endl;
+							std::cout << addr.toString() << " - Moved into zone " << (int)peer.zone << std::endl;
 
 							// The client will have already hidden all peers it can no longer see now, but we still have to:
 							for (auto& other : peers)
@@ -414,6 +454,7 @@ int main(int argc, const char** argv)
 									if (peer.canSeeZone(other.zone))
 									{
 										other.sendPositionTo(peer, s);
+										other.sendStatusTo(peer, s);
 									}
 
 									// Inform peers who can no longer see this client.
@@ -594,6 +635,11 @@ int main(int argc, const char** argv)
 
 				if (auto jr = json::decode(msg); jr && jr->isObj())
 				{
+					if (jr->reinterpretAsObj().contains("status"))
+					{
+						peer->status = msg;
+					}
+
 					if (jr->reinterpretAsObj().contains("loadout"))
 					{
 						peer->loadout = jr->reinterpretAsObj().at("loadout").asObj().encode();

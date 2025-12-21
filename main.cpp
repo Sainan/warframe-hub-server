@@ -241,12 +241,11 @@ struct HubPeer
 
 			{
 				StringWriter sw;
-				{ uint8_t b = 0xb4; sw.u8(b); }
 				{ uint8_t b = HMSG_CONTROL; sw.u8(b); }
 				sw.u16_le(this->id);
 				sw.oml(this->status.size());
 				sw.str(this->status.size(), this->status.data());
-				s.udpServerSend(other.addr, packData(sw.data, other.salt));
+				other.sendReliablePacket(s, sw.data);
 			}
 		}
 	}
@@ -655,7 +654,6 @@ int main(int argc, const char** argv)
 					else
 					{
 						StringWriter sw;
-						{ uint8_t b = 0xb4; sw.u8(b); }
 						{ uint8_t b = HMSG_CONTROL; sw.u8(b); }
 						sw.u16_le(peerId);
 						sw.oml(len);
@@ -673,7 +671,7 @@ int main(int argc, const char** argv)
 							{
 								if (other.id != peerId && other.level == peer->level)
 								{
-									s.udpServerSend(other.addr, packData(sw.data, other.salt));
+									other.sendReliablePacket(s, sw.data);
 									++recipients;
 								}
 							}
@@ -684,7 +682,7 @@ int main(int argc, const char** argv)
 							{
 								if (other.id != peerId && other.level == peer->level && other.canSeeZone(peer->zone))
 								{
-									s.udpServerSend(other.addr, packData(sw.data, other.salt));
+									other.sendReliablePacket(s, sw.data);
 									++recipients;
 								}
 							}
@@ -695,7 +693,7 @@ int main(int argc, const char** argv)
 							{
 								if (other.acctid == to)
 								{
-									s.udpServerSend(other.addr, packData(sw.data, other.salt));
+									other.sendReliablePacket(s, sw.data);
 									++recipients;
 									break;
 								}

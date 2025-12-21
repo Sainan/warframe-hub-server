@@ -2,6 +2,7 @@
 #include <iostream>
 
 #include <crc32c.hpp>
+#include <joaat.hpp>
 #include <json.hpp>
 #include <lzf.hpp>
 #include <MemoryRefReader.hpp>
@@ -659,13 +660,48 @@ int main(int argc, const char** argv)
 						sw.u16_le(peerId);
 						sw.oml(len);
 						sw.str(len, msg);
-						for (auto& other : peers)
+
+						std::string_view to = "all";
+						if (jr->reinterpretAsObj().contains("to"))
 						{
-							if (other.id != peerId && other.level == peer->level)
+							to = jr->reinterpretAsObj().at("to").asStr().value;
+						}
+						unsigned recipients = 0;
+						if (to == "all" || to == "dojo")
+						{
+							for (auto& other : peers)
 							{
-								s.udpServerSend(other.addr, packData(sw.data, other.salt));
+								if (other.id != peerId && other.level == peer->level)
+								{
+									s.udpServerSend(other.addr, packData(sw.data, other.salt));
+									++recipients;
+								}
 							}
 						}
+						else if (to == "zone")
+						{
+							for (auto& other : peers)
+							{
+								if (other.id != peerId && other.level == peer->level && other.canSeeZone(peer->zone))
+								{
+									s.udpServerSend(other.addr, packData(sw.data, other.salt));
+									++recipients;
+								}
+							}
+						}
+						else
+						{
+							for (auto& other : peers)
+							{
+								if (other.acctid == to)
+								{
+									s.udpServerSend(other.addr, packData(sw.data, other.salt));
+									++recipients;
+									break;
+								}
+							}
+						}
+						std::cout << addr.toString() << " - Forwarded to " << recipients << " peer(s)" << std::endl;
 					}
 				}
 			}

@@ -525,6 +525,7 @@ int main(int argc, const char** argv)
 						}
 						peer.zone_pairs.emplace_back(lo, hi);
 					}
+					break;
 				}
 			}
 			break;

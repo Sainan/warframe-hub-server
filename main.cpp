@@ -537,9 +537,15 @@ int main(int argc, const char** argv)
 
 		case CMSG_JOIN:
 			{
+				std::string acctid;
+				sr.str_lp<u8_t>(acctid);
+
 				for (auto i = peers.begin(); i != peers.end(); )
 				{
-					if (i->addr == addr || time::millisSince(i->last_sign_of_life) > HubPeer::TIMEOUT_MS)
+					if (i->addr == addr
+						|| i->acctid == acctid
+						|| time::millisSince(i->last_sign_of_life) > HubPeer::TIMEOUT_MS
+						)
 					{
 						broadcast_kick(s, i->id);
 						i = peers.erase(i);
@@ -561,7 +567,7 @@ int main(int argc, const char** argv)
 				}
 
 				auto& peer = peers.emplace_back(HubPeer{ addr, peerId, time::millis(), salt });
-				sr.str_lp<u8_t>(peer.acctid);
+				peer.acctid = std::move(acctid);
 				sr.i16_le(peer.x);
 				sr.i16_le(peer.y);
 				sr.i16_le(peer.z);

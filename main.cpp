@@ -12,6 +12,7 @@
 #include <string.hpp>
 #include <StringWriter.hpp>
 #include <time.hpp>
+#include <utility.hpp>
 
 #ifdef DOCKER
 #include <signal.h>
@@ -19,32 +20,32 @@
 
 using namespace soup;
 
-[[nodiscard]] static std::string addHeader(const std::string& data, const std::string_view& salt)
-{
-	uint32_t initial = crc32c::hash((const uint8_t*)data.data(), data.size());
-	uint32_t hash = crc32c::hash((const uint8_t*)salt.data(), salt.size(), initial);
-
-	StringWriter sw;
-
-	uint8_t compression_byte = 0;
-	sw.u8(compression_byte);
-
-	sw.u32_be(hash);
-
-	//std::cout << "Server says: " << string::bin2hex(sw.data) << string::bin2hex(data) << std::endl;
-	return sw.data + data;
-}
-
-[[nodiscard]] static std::string packData(const std::string& data, const std::string_view& salt)
+static std::string packData(const std::string& data, const std::string_view& salt)
 {
 	StringWriter sw;
+
+	sw.skip(5); // placeholder for compression byte + CRC
 
 	uint32_t magic = 0x80;
 	sw.u32_be(magic);
 
 	sw.str_lp<u16_le_t>(data);
 
-	return addHeader(sw.data, salt);
+	uint32_t initial = crc32c::hash((const uint8_t*)sw.data.data() + 5, sw.data.size() - 5);
+	*(uint32_t*)(sw.data.data() + 1) = Endianness::toNetwork(crc32c::hash((const uint8_t*)salt.data(), salt.size(), initial));
+
+	//std::cout << "Server says: " << string::bin2hex(sw.data) << std::endl;
+
+	// For some reason, this does not work. Client says "Discarding packet with invalid decompression size".
+#if false
+	char buffer[0x500];
+	if (auto compressed_size = lzf::compress(data.data() + 1, data.size() - 1, buffer, sizeof(buffer)); compressed_size && compressed_size < data.size())
+	{
+		sw.data = std::string(buffer, compressed_size);
+	}
+#endif
+
+	SOUP_MOVE_RETURN(sw.data);
 }
 
 enum IncomingMsgIds : uint8_t
@@ -313,7 +314,7 @@ int main(int argc, const char** argv)
 				sr.skip(1);
 			}
 
-			char buffer[3000];
+			char buffer[0x500];
 			const auto decompressed_size = lzf::decompress(data.data() + sr.getPosition(), data.size() - sr.getPosition(), buffer, sizeof(buffer));
 			data = std::string(buffer, decompressed_size);
 			sr = MemoryRefReader(data);

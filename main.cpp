@@ -73,10 +73,12 @@ enum OutgoingMsgIds : uint8_t
 
 struct HubPeer
 {
+	// Peers send a heartbeat every 30 seconds, so we need to account for latency at least. Packet loss could also be a factor.
+	static constexpr time_t TIMEOUT_MS = 69'000;
+
 	SocketAddr addr;
 	uint16_t id;
-	//time_t connected_at;
-	time_t last_sign_of_life; // Connections that had no traffic in 30 seconds time out.
+	time_t last_sign_of_life;
 	std::string_view salt;
 	std::string name;
 	std::string acctid;
@@ -535,7 +537,7 @@ int main(int argc, const char** argv)
 			{
 				for (auto i = peers.begin(); i != peers.end(); )
 				{
-					if (i->addr == addr || time::millisSince(i->last_sign_of_life) > 30'000)
+					if (i->addr == addr || time::millisSince(i->last_sign_of_life) > HubPeer::TIMEOUT_MS)
 					{
 						broadcast_kick(s, i->id);
 						i = peers.erase(i);
@@ -595,7 +597,7 @@ int main(int argc, const char** argv)
 
 				for (auto i = peers.begin(); i != peers.end(); )
 				{
-					if (i->addr == addr || time::millisSince(i->last_sign_of_life) > 30'000)
+					if (i->addr == addr || time::millisSince(i->last_sign_of_life) > HubPeer::TIMEOUT_MS)
 					{
 						broadcast_kick(s, i->id);
 						i = peers.erase(i);

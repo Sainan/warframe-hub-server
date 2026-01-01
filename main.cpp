@@ -373,6 +373,8 @@ int main(int argc, const char** argv)
 				return;
 			}
 
+			peer->last_sign_of_life = time::millis();
+
 			if (unk_byte == 0xC8)
 			{
 				if (peer->pending_reliables.empty())

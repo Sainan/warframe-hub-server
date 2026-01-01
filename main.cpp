@@ -26,8 +26,8 @@ static std::string packData(const std::string& data, const std::string_view& sal
 
 	sw.skip(5); // placeholder for compression byte + CRC
 
-	uint32_t magic = 0x80;
-	sw.u32_be(magic);
+	uint32_t magic = 0x80000000;
+	sw.u32_le(magic);
 
 	sw.str_lp<u16_le_t>(data);
 
@@ -336,9 +336,9 @@ int main(int argc, const char** argv)
 
 		{
 			uint32_t magic;
-			sr.u32_be(magic);
+			sr.u32_le(magic);
 			//std::cout << "Magic: " << magic << std::endl;
-			if (magic != 0x80)
+			if (magic != 0x80000000)
 			{
 				std::cout << addr.toString() << " - Invalid magic" << std::endl;
 				return;

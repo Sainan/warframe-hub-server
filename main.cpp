@@ -36,12 +36,20 @@ static std::string packData(const std::string& data, const std::string_view& sal
 
 	//std::cout << "Server says: " << string::bin2hex(sw.data) << std::endl;
 
-	// For some reason, this does not work. Client says "Discarding packet with invalid decompression size".
-#if false
-	char buffer[0x500];
-	if (auto compressed_size = lzf::compress(data.data() + 1, data.size() - 1, buffer, sizeof(buffer)); compressed_size && compressed_size < data.size())
+#if false // Not using compression for outgoing packets so bot makers aren't forced to implement it
+	if (uint16_t decompressed_size = sw.data.size() - 1;
+		decompressed_size > 0x3F
+		)
 	{
-		sw.data = std::string(buffer, compressed_size);
+		uint8_t buffer[0x500];
+		if (auto compressed_size = lzf::compress(sw.data.data() + 1, sw.data.size() - 1, buffer + 2, sizeof(buffer) - 2);
+			compressed_size != 0 && (compressed_size + 2) < sw.data.size()
+			)
+		{
+			buffer[0] = (decompressed_size >> 6) | 0x80;
+			buffer[1] = (decompressed_size & 0x3F) | 0xC0;
+			return std::string((const char*)buffer, compressed_size + 2);
+		}
 	}
 #endif
 
@@ -307,17 +315,29 @@ int main(int argc, const char** argv)
 	{
 		MemoryRefReader sr(data);
 
-		uint8_t compression_byte;
-		sr.u8(compression_byte);
-		if (compression_byte != 0)
+		uint8_t unk_byte;
+		sr.u8(unk_byte);
+		if (unk_byte != 0)
 		{
-			if (compression_byte & 0x80)
+			uint16_t expected_decompressed_size = unk_byte;
+			if (unk_byte & 0x80)
 			{
-				sr.skip(1);
+				expected_decompressed_size &= 0x3F;
+				while (unk_byte & 0x40)
+				{
+					sr.u8(unk_byte);
+					expected_decompressed_size <<= 6;
+					expected_decompressed_size |= unk_byte & 0x3F;
+				}
 			}
 
 			char buffer[0x500];
 			const auto decompressed_size = lzf::decompress(data.data() + sr.getPosition(), data.size() - sr.getPosition(), buffer, sizeof(buffer));
+			if (decompressed_size != expected_decompressed_size)
+			{
+				std::cout << addr.toString() << " - Decompressed size mismatch (got " << decompressed_size << ", expected " << expected_decompressed_size << "): " << string::bin2hex(data) << std::endl;
+				//return;
+			}
 			data = std::string(buffer, decompressed_size);
 			sr = MemoryRefReader(data);
 		}
@@ -355,7 +375,6 @@ int main(int argc, const char** argv)
 		}
 		sr = MemoryRefReader(data);
 
-		uint8_t unk_byte;
 		sr.u8(unk_byte);
 		if (unk_byte == 0xB8)
 		{

@@ -593,7 +593,12 @@ int main(int argc, const char** argv)
 					s.udpServerSend(addr, packData(sw.data, salt));
 				}
 
-				std::cout << addr.toString() << " - " << peer.name << " (" << peer.acctid << ", " << peer.clan_name << ") is joining " << peer.level << ", zone " << (int)peer.zone << ", assigned id " << peer.id << std::endl;
+				std::cout << addr.toString() << " - " << peer.name << " (" << peer.acctid;
+				if (!peer.clan_name.empty())
+				{
+					std::cout << ", " << peer.clan_name;
+				}
+				std::cout << ") is joining " << peer.level << ", zone " << (int)peer.zone << ", assigned id " << peer.id << std::endl;
 			}
 			break;
 

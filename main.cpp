@@ -26,6 +26,7 @@ static bool is_u32_or_below(const std::string_view& salt)
 	return salt == "b471e49539930dc9b5a131e6247c7387E"
 		|| salt == "b471e49539930dc9b5a131e6247c7387D"
 		|| salt == "b471e49539930dc9b5a131e6247c7387B"
+		|| salt == "b471e49539930dc9b5a131e6247c7387A"
 		;
 }
 
@@ -410,17 +411,22 @@ int main(int argc, const char** argv)
 						salt = "b471e49539930dc9b5a131e6247c7387D"; // < U28 && >= U27
 						if (crc32::hash((const uint8_t*)salt.data(), salt.size(), initial) != chksum)
 						{
-							salt = "b471e49539930dc9b5a131e6247c7387B"; // < U27
+							salt = "b471e49539930dc9b5a131e6247c7387B"; // < U27 && >= U23
 							if (crc32::hash((const uint8_t*)salt.data(), salt.size(), initial) != chksum)
 							{
-								std::cout << addr.toString() << " - Checksum mismatch" << std::endl;
-								return;
+								salt = "b471e49539930dc9b5a131e6247c7387A"; // < U23
+								if (crc32::hash((const uint8_t*)salt.data(), salt.size(), initial) != chksum)
+								{
+									std::cout << addr.toString() << " - Checksum mismatch" << std::endl;
+									return;
+								}
 							}
 						}
 					}
 				}
 			}
 		}
+		//std::cout << addr.toString() << " - salt = " << salt << std::endl;
 
 		{
 			uint32_t magic;

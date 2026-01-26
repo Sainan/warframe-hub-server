@@ -1,6 +1,7 @@
 #include <deque>
 #include <iostream>
 
+#include <crc32.hpp>
 #include <crc32c.hpp>
 #include <joaat.hpp>
 #include <json.hpp>
@@ -20,6 +21,11 @@
 
 using namespace soup;
 
+static bool is_u32_or_below(const std::string_view& salt)
+{
+	return salt == "b471e49539930dc9b5a131e6247c7387E";
+}
+
 static std::string packData(const std::string& data, const std::string_view& salt)
 {
 	StringWriter sw;
@@ -31,8 +37,16 @@ static std::string packData(const std::string& data, const std::string_view& sal
 
 	sw.str_lp<u16_le_t>(data);
 
-	uint32_t initial = crc32c::hash((const uint8_t*)sw.data.data() + 5, sw.data.size() - 5);
-	*(uint32_t*)(sw.data.data() + 1) = Endianness::toNetwork(crc32c::hash((const uint8_t*)salt.data(), salt.size(), initial));
+	if (is_u32_or_below(salt))
+	{
+		uint32_t initial = crc32::hash((const uint8_t*)sw.data.data() + 5, sw.data.size() - 5);
+		*(uint32_t*)(sw.data.data() + 1) = Endianness::toNetwork(crc32::hash((const uint8_t*)salt.data(), salt.size(), initial));	
+	}
+	else
+	{
+		uint32_t initial = crc32c::hash((const uint8_t*)sw.data.data() + 5, sw.data.size() - 5);
+		*(uint32_t*)(sw.data.data() + 1) = Endianness::toNetwork(crc32c::hash((const uint8_t*)salt.data(), salt.size(), initial));
+	}
 
 	//std::cout << "Server says: " << string::bin2hex(sw.data) << std::endl;
 
@@ -81,7 +95,9 @@ enum OutgoingMsgIds : uint8_t
 
 static bool is_u35_or_below(const std::string_view& salt)
 {
-	return salt == "b471e49539930dc9b5a131e6247c7387F";
+	return salt == "b471e49539930dc9b5a131e6247c7387F"
+		|| is_u32_or_below(salt)
+		;
 }
 
 template <typename T>
@@ -384,8 +400,13 @@ int main(int argc, const char** argv)
 				salt = "b471e49539930dc9b5a131e6247c7387F"; // < U35.5 && >= U33
 				if (crc32c::hash((const uint8_t*)salt.data(), salt.size(), initial) != chksum)
 				{
-					std::cout << addr.toString() << " - Checksum mismatch" << std::endl;
-					return;
+					initial = crc32::hash((const uint8_t*)data.data() + sr.getPosition(), data.size() - sr.getPosition(), 0);
+					salt = "b471e49539930dc9b5a131e6247c7387E"; // < U33
+					if (crc32::hash((const uint8_t*)salt.data(), salt.size(), initial) != chksum)
+					{
+						std::cout << addr.toString() << " - Checksum mismatch" << std::endl;
+						return;
+					}
 				}
 			}
 		}

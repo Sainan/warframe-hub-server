@@ -23,7 +23,9 @@ using namespace soup;
 
 static bool is_u32_or_below(const std::string_view& salt)
 {
-	return salt == "b471e49539930dc9b5a131e6247c7387E";
+	return salt == "b471e49539930dc9b5a131e6247c7387E"
+		|| salt == "b471e49539930dc9b5a131e6247c7387D"
+		;
 }
 
 static std::string packData(const std::string& data, const std::string_view& salt)
@@ -401,11 +403,15 @@ int main(int argc, const char** argv)
 				if (crc32c::hash((const uint8_t*)salt.data(), salt.size(), initial) != chksum)
 				{
 					initial = crc32::hash((const uint8_t*)data.data() + sr.getPosition(), data.size() - sr.getPosition(), 0);
-					salt = "b471e49539930dc9b5a131e6247c7387E"; // < U33
+					salt = "b471e49539930dc9b5a131e6247c7387E"; // < U33 && >= U28
 					if (crc32::hash((const uint8_t*)salt.data(), salt.size(), initial) != chksum)
 					{
-						std::cout << addr.toString() << " - Checksum mismatch" << std::endl;
-						return;
+						salt = "b471e49539930dc9b5a131e6247c7387D"; // < U28
+						if (crc32::hash((const uint8_t*)salt.data(), salt.size(), initial) != chksum)
+						{
+							std::cout << addr.toString() << " - Checksum mismatch" << std::endl;
+							return;
+						}
 					}
 				}
 			}

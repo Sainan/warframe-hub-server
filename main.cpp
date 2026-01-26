@@ -630,6 +630,11 @@ int main(int argc, const char** argv)
 			{
 				std::string acctid;
 				ser_str(sr, salt, acctid);
+				if (acctid.size() != 24)
+				{
+					std::cout << addr.toString() << " - Attempted join from < U22 client; not supported (yet)" << std::endl;
+					return;
+				}
 
 				for (auto i = peers.begin(); i != peers.end(); )
 				{

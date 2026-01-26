@@ -79,6 +79,26 @@ enum OutgoingMsgIds : uint8_t
 	HMSG_HIDE_PEER = 9,
 };
 
+static bool is_u35_or_below(const std::string_view& salt)
+{
+	return salt == "b471e49539930dc9b5a131e6247c7387F";
+}
+
+template <typename T>
+static void ser_str(T& s, const std::string_view& salt, std::string& str)
+{
+	if (is_u35_or_below(salt))
+	{
+		s.template str_lp<u32_le_t>(str);
+	}
+	else
+	{
+		uint32_t len = str.size();
+		s.oml(len);
+		s.str(len, str);
+	}
+}
+
 struct HubPeer
 {
 	// Peers send a heartbeat every 30 seconds, so we need to account for latency at least. Packet loss could also be a factor.
@@ -107,7 +127,7 @@ struct HubPeer
 
 	bool isU41orAbove() const noexcept
 	{
-		return salt != "b471e49539930dc9b5a131e6247c7387G";
+		return salt == "b471e49539930dc9b5a131e6247c7387H";
 	}
 
 	void sendReliablePacket(Socket& s, const std::string& data)
@@ -189,16 +209,15 @@ struct HubPeer
 		sw.i16_le(this->y);
 		sw.i16_le(this->z);
 		sw.i8(this->rotation);
-		sw.str_lp<u8_t>(this->name);
-		sw.str_lp<u8_t>(this->acctid);
-		sw.str_lp<u8_t>(this->clan_name);
+		ser_str(sw, other.salt, this->name);
+		ser_str(sw, other.salt, this->acctid);
+		ser_str(sw, other.salt, this->clan_name);
 		if (other.isU41orAbove())
 		{
-			sw.str_lp<u8_t>(this->title);
+			ser_str(sw, other.salt, this->title);
 		}
-		sw.oml(this->loadout.size());
-		sw.str(this->loadout.size(), this->loadout.data());
-		sw.skip(1);
+		ser_str(sw, other.salt, this->loadout);
+		{ std::string unk; ser_str(sw, other.salt, unk); }
 		sw.u8(this->zone);
 		sw.skip(2);
 		other.sendBigPacket(s, sw.data);
@@ -248,8 +267,7 @@ struct HubPeer
 				StringWriter sw;
 				{ uint8_t b = HMSG_CONTROL; sw.u8(b); }
 				sw.u16_le(this->id);
-				sw.oml(this->status.size());
-				sw.str(this->status.size(), this->status.data());
+				ser_str(sw, other.salt, this->status);
 				other.sendReliablePacket(s, sw.data);
 			}
 
@@ -266,8 +284,7 @@ struct HubPeer
 				StringWriter sw;
 				{ uint8_t b = HMSG_CONTROL; sw.u8(b); }
 				sw.u16_le(this->id);
-				sw.oml(data.size());
-				sw.str(data.size(), data.data());
+				ser_str(sw, other.salt, data);
 				other.sendReliablePacket(s, sw.data);
 			}
 
@@ -275,8 +292,7 @@ struct HubPeer
 				StringWriter sw;
 				{ uint8_t b = HMSG_CONTROL; sw.u8(b); }
 				sw.u16_le(this->id);
-				sw.oml(this->status.size());
-				sw.str(this->status.size(), this->status.data());
+				ser_str(sw, other.salt, this->status);
 				other.sendReliablePacket(s, sw.data);
 			}
 		}
@@ -362,11 +378,15 @@ int main(int argc, const char** argv)
 		std::string_view salt = "b471e49539930dc9b5a131e6247c7387H"; // >= U41
 		if (crc32c::hash((const uint8_t*)salt.data(), salt.size(), initial) != chksum)
 		{
-			salt = "b471e49539930dc9b5a131e6247c7387G"; // < U41
+			salt = "b471e49539930dc9b5a131e6247c7387G"; // < U41 && >= U35.5
 			if (crc32c::hash((const uint8_t*)salt.data(), salt.size(), initial) != chksum)
 			{
-				std::cout << addr.toString() << " - Checksum mismatch" << std::endl;
-				return;
+				salt = "b471e49539930dc9b5a131e6247c7387F"; // < U35.5 && >= U33
+				if (crc32c::hash((const uint8_t*)salt.data(), salt.size(), initial) != chksum)
+				{
+					std::cout << addr.toString() << " - Checksum mismatch" << std::endl;
+					return;
+				}
 			}
 		}
 
@@ -571,7 +591,7 @@ int main(int argc, const char** argv)
 		case CMSG_JOIN:
 			{
 				std::string acctid;
-				sr.str_lp<u8_t>(acctid);
+				ser_str(sr, salt, acctid);
 
 				for (auto i = peers.begin(); i != peers.end(); )
 				{
@@ -606,13 +626,13 @@ int main(int argc, const char** argv)
 				sr.i16_le(peer.z);
 				sr.i8(peer.rotation);
 				sr.u8(peer.zone);
-				sr.str_lp<u8_t>(peer.name);
-				sr.str_lp<u8_t>(peer.clan_name);
+				ser_str(sr, salt, peer.name);
+				ser_str(sr, salt, peer.clan_name);
 				if (peer.isU41orAbove())
 				{
-					sr.str_lp<u8_t>(peer.title);
+					ser_str(sr, salt, peer.title);
 				}
-				sr.str_lp<u8_t>(peer.level);
+				ser_str(sr, salt, peer.level);
 
 				{
 					StringWriter sw;
@@ -626,7 +646,7 @@ int main(int argc, const char** argv)
 					StringWriter sw;
 					{ uint8_t b = 0xb4; sw.u8(b); }
 					{ uint8_t b = HMSG_ZONE_PAIRS; sw.u8(b); }
-					sw.str_lp<u8_t>(peer.level);
+					ser_str(sw, salt, peer.level);
 					s.udpServerSend(addr, packData(sw.data, salt));
 				}
 
@@ -697,10 +717,8 @@ int main(int argc, const char** argv)
 				}
 				peer->resendUnackedPackets(s);
 
-				uint32_t len;
-				sr.oml(len);
 				std::string msg;
-				sr.str(len, msg);
+				ser_str(sr, salt, msg);
 
 				std::cout << addr.toString() << " - Got control message: " << msg << std::endl;
 
@@ -724,12 +742,6 @@ int main(int argc, const char** argv)
 					}
 					else
 					{
-						StringWriter sw;
-						{ uint8_t b = HMSG_CONTROL; sw.u8(b); }
-						sw.u16_le(peerId);
-						sw.oml(len);
-						sw.str(len, msg);
-
 						std::string_view to = "all";
 						if (jr->reinterpretAsObj().contains("to"))
 						{
@@ -742,6 +754,10 @@ int main(int argc, const char** argv)
 							{
 								if (other.id != peerId && other.level == peer->level)
 								{
+									StringWriter sw;
+									{ uint8_t b = HMSG_CONTROL; sw.u8(b); }
+									sw.u16_le(peerId);
+									ser_str(sw, other.salt, msg);
 									other.sendReliablePacket(s, sw.data);
 									++recipients;
 								}
@@ -753,6 +769,10 @@ int main(int argc, const char** argv)
 							{
 								if (other.id != peerId && other.level == peer->level && other.canSeeZone(peer->zone))
 								{
+									StringWriter sw;
+									{ uint8_t b = HMSG_CONTROL; sw.u8(b); }
+									sw.u16_le(peerId);
+									ser_str(sw, other.salt, msg);
 									other.sendReliablePacket(s, sw.data);
 									++recipients;
 								}
@@ -764,6 +784,10 @@ int main(int argc, const char** argv)
 							{
 								if (other.acctid == to)
 								{
+									StringWriter sw;
+									{ uint8_t b = HMSG_CONTROL; sw.u8(b); }
+									sw.u16_le(peerId);
+									ser_str(sw, other.salt, msg);
 									other.sendReliablePacket(s, sw.data);
 									++recipients;
 									break;
@@ -782,9 +806,7 @@ int main(int argc, const char** argv)
 				sr.u16_le(peerId);
 				if (auto peer = get_peer_by_id(peerId); peer && peer->addr == addr)
 				{
-					uint32_t len;
-					sr.oml(len);
-					sr.str(len, peer->loadout);
+					ser_str(sr, salt, peer->loadout);
 
 					for (auto& other : peers)
 					{

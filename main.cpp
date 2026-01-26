@@ -41,7 +41,7 @@ static std::string packData(const std::string& data, const std::string_view& sal
 		decompressed_size > 0x3F
 		)
 	{
-		uint8_t buffer[0x500];
+		uint8_t buffer[0x1000];
 		if (auto compressed_size = lzf::compress(sw.data.data() + 1, sw.data.size() - 1, buffer + 2, sizeof(buffer) - 2);
 			compressed_size != 0 && (compressed_size + 2) < sw.data.size()
 			)
@@ -331,7 +331,7 @@ int main(int argc, const char** argv)
 				}
 			}
 
-			char buffer[0x500];
+			char buffer[0x1000];
 			const auto decompressed_size = lzf::decompress(data.data() + sr.getPosition(), data.size() - sr.getPosition(), buffer, sizeof(buffer));
 			if (decompressed_size != expected_decompressed_size)
 			{

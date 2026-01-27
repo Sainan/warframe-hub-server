@@ -3,6 +3,7 @@
 
 #include <crc32.hpp>
 #include <crc32c.hpp>
+#include <HttpRequestTask.hpp>
 #include <joaat.hpp>
 #include <json.hpp>
 #include <lzf.hpp>
@@ -20,6 +21,30 @@
 #endif
 
 using namespace soup;
+
+#ifdef DOCKER
+#define SERVER_HOST "spaceninjaserver"
+#else
+#define SERVER_HOST "localhost"
+#endif
+
+struct ReportHubPeerDtorTask : public HttpRequestTask
+{
+	ReportHubPeerDtorTask(const std::string& level)
+		: HttpRequestTask(buildRequest(level))
+	{
+	}
+
+	static HttpRequest buildRequest(const std::string& level)
+	{
+		std::string path = "/custom/hubDropped?level=";
+		path.append(level);
+
+		HttpRequest hr(SERVER_HOST, std::move(path));
+		hr.use_tls = false;
+		return hr;
+	}
+};
 
 static bool is_u32_or_below(const std::string_view& salt)
 {
@@ -144,6 +169,16 @@ struct HubPeer
 	uint32_t buffer_expected_size = 0;
 	std::string buffer;
 	std::deque<std::string> pending_reliables;
+
+	~HubPeer()
+	{
+		//std::cout << "~HubPeer: level=" << level << std::endl;
+
+		if (!level.empty())
+		{
+			Scheduler::get()->add<ReportHubPeerDtorTask>(level);
+		}
+	}
 
 	bool isU41orAbove() const noexcept
 	{
@@ -712,6 +747,7 @@ int main(int argc, const char** argv)
 				std::cout << ") is joining " << peer.level << ", zone " << (int)peer.zone << ", assigned id " << peer.id << std::endl;
 
 				peers.emplace_back(std::move(peer));
+				peer.level.clear();
 			}
 			break;
 

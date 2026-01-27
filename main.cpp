@@ -872,6 +872,17 @@ int main(int argc, const char** argv)
 							peer->introduceTo(other, s);
 						}
 					}
+
+					if (peer->level.starts_with("SCENARIOEVENTHUB5"))
+					{
+						std::string data = R"({"scenario":{"endTime":"2000000000"}})";
+
+						StringWriter sw;
+						{ uint8_t b = HMSG_CONTROL; sw.u8(b); }
+						sw.u16_le(peerId);
+						ser_str(sw, salt, data);
+						peer->sendReliablePacket(s, sw.data);
+					}
 				}
 				else
 				{

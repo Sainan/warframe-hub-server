@@ -628,18 +628,45 @@ int main(int argc, const char** argv)
 
 		case CMSG_JOIN:
 			{
-				std::string acctid;
-				ser_str(sr, salt, acctid);
-				if (acctid.size() != 24)
+				HubPeer peer{
+					.addr = addr,
+					.id = 0,
+					.last_sign_of_life = time::millis(),
+					.salt = salt,
+				};
+				if (auto ptr = sr.getMemoryView(1); ptr && *(const uint8_t*)ptr != 24) // < U22
 				{
-					std::cout << addr.toString() << " - Attempted join from < U22 client; not supported (yet)" << std::endl;
-					return;
+					sr.i16_le(peer.x);
+					sr.i16_le(peer.y);
+					sr.i16_le(peer.z);
+					sr.i8(peer.rotation);
+					sr.u8(peer.zone);
+					ser_str(sr, salt, peer.name);
+					ser_str(sr, salt, peer.acctid);
+					ser_str(sr, salt, peer.clan_name);
+					ser_str(sr, salt, peer.level);
+				}
+				else // >= U23
+				{
+					ser_str(sr, salt, peer.acctid);
+					sr.i16_le(peer.x);
+					sr.i16_le(peer.y);
+					sr.i16_le(peer.z);
+					sr.i8(peer.rotation);
+					sr.u8(peer.zone);
+					ser_str(sr, salt, peer.name);
+					ser_str(sr, salt, peer.clan_name);
+					if (peer.isU41orAbove())
+					{
+						ser_str(sr, salt, peer.title);
+					}
+					ser_str(sr, salt, peer.level);
 				}
 
 				for (auto i = peers.begin(); i != peers.end(); )
 				{
 					if (i->addr == addr
-						|| i->acctid == acctid
+						|| i->acctid == peer.acctid
 						|| time::millisSince(i->last_sign_of_life) > HubPeer::TIMEOUT_MS
 						)
 					{
@@ -652,30 +679,14 @@ int main(int argc, const char** argv)
 					}
 				}
 
-				uint16_t peerId = 0;
-				while (get_peer_by_id(peerId))
+				while (get_peer_by_id(peer.id))
 				{
-					if (++peerId == 0xFFFF)
+					if (++peer.id == 0xFFFF)
 					{
 						std::cout << addr.toString() << " - Attempted join but we're at capacity" << std::endl;
 						return;
 					}
 				}
-
-				auto& peer = peers.emplace_back(HubPeer{ addr, peerId, time::millis(), salt });
-				peer.acctid = std::move(acctid);
-				sr.i16_le(peer.x);
-				sr.i16_le(peer.y);
-				sr.i16_le(peer.z);
-				sr.i8(peer.rotation);
-				sr.u8(peer.zone);
-				ser_str(sr, salt, peer.name);
-				ser_str(sr, salt, peer.clan_name);
-				if (peer.isU41orAbove())
-				{
-					ser_str(sr, salt, peer.title);
-				}
-				ser_str(sr, salt, peer.level);
 
 				{
 					StringWriter sw;
@@ -699,6 +710,8 @@ int main(int argc, const char** argv)
 					std::cout << ", " << peer.clan_name;
 				}
 				std::cout << ") is joining " << peer.level << ", zone " << (int)peer.zone << ", assigned id " << peer.id << std::endl;
+
+				peers.emplace_back(std::move(peer));
 			}
 			break;
 

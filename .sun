@@ -1,4 +1,4 @@
 +*.cpp
+c++ 20
 require Soup/soup
-
 arg -O3

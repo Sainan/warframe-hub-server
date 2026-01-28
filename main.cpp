@@ -168,7 +168,7 @@ struct HubPeer
 	uint32_t last_send_seq_id = 0;
 	uint32_t buffer_expected_size = 0;
 	std::string buffer;
-	std::deque<std::string> pending_reliables;
+	std::deque<std::pair<time_t, std::string>> pending_reliables;
 
 	~HubPeer()
 	{
@@ -196,7 +196,7 @@ struct HubPeer
 		sw.u32_le(this->last_send_seq_id);
 		{ uint8_t b = 0xCC; sw.u8(b); }
 		sw.raw((void*)data.data(), data.size());
-		s.udpServerSend(addr, this->pending_reliables.emplace_back(packData(sw.data, this->salt)));
+		s.udpServerSend(addr, this->pending_reliables.emplace_back(time::millis(), packData(sw.data, this->salt)).second);
 	}
 
 	void sendBigPacket(Socket& s, const std::string& data)
@@ -221,7 +221,7 @@ struct HubPeer
 				{ uint8_t b = 0x90; sw.u8(b); }
 				sw.u32_le(total_length);
 				sw.raw((void*)data.data(), 0x493);
-				s.udpServerSend(this->addr, this->pending_reliables.emplace_back(packData(sw.data, this->salt)));
+				s.udpServerSend(this->addr, this->pending_reliables.emplace_back(time::millis(), packData(sw.data, this->salt)).second);
 			}
 			for (uint32_t offset = 0x493; offset != total_length; )
 			{
@@ -238,20 +238,23 @@ struct HubPeer
 				{ uint8_t b = 0x90; sw.u8(b); }
 				{ uint32_t dw = 0; sw.u32_le(dw); }
 				sw.raw((void*)(data.data() + offset), chunk_size);
-				s.udpServerSend(this->addr, this->pending_reliables.emplace_back(packData(sw.data, this->salt)));
+				s.udpServerSend(this->addr, this->pending_reliables.emplace_back(time::millis(), packData(sw.data, this->salt)).second);
 
 				offset += chunk_size;
 			}
 		}
 	}
 
-	void resendUnackedPackets(Socket& s)
+	void onSignOfLife(Socket& s)
 	{
-		if (!this->pending_reliables.empty())
+		this->last_sign_of_life = time::millis();
+
+		if (!this->pending_reliables.empty() && time::millisSince(this->pending_reliables.front().first) > 3000)
 		{
 			const auto seq_id = (this->last_send_seq_id - (this->pending_reliables.size() - 1));
 			std::cout << addr.toString() << " - Resending reliable packet to peerId=" << this->id << " with seqId=" << this->last_send_seq_id << std::endl;
-			s.udpServerSend(this->addr, this->pending_reliables.front());
+			this->pending_reliables.front().first = time::millis();
+			s.udpServerSend(this->addr, this->pending_reliables.front().second);
 		}
 	}
 
@@ -499,8 +502,6 @@ int main(int argc, const char** argv)
 				return;
 			}
 
-			peer->last_sign_of_life = time::millis();
-
 			if (unk_byte == 0xC8)
 			{
 				if (peer->pending_reliables.empty())
@@ -512,8 +513,10 @@ int main(int argc, const char** argv)
 					std::cout << addr.toString() << " - Got ack from peerId=" << peerId << " for seqId=" << seqId << std::endl;
 					peer->pending_reliables.pop_front();
 				}
+				peer->onSignOfLife(s);
 				return;
 			}
+			peer->onSignOfLife(s);
 
 			//std::cout << addr.toString() << " - Reliable packet from peerId=" << peerId << " with seqId=" << seqId << std::endl;
 
@@ -573,8 +576,7 @@ int main(int argc, const char** argv)
 					if (peer.addr == addr)
 					{
 						ok = true;
-						peer.last_sign_of_life = time::millis();
-						peer.resendUnackedPackets(s);
+						peer.onSignOfLife(s);
 
 						const auto old_zone = peer.zone;
 						sr.i16_le(peer.x);
@@ -779,8 +781,7 @@ int main(int argc, const char** argv)
 				if (auto peer = get_peer_by_id(peerId); peer && peer->addr == addr)
 				{
 					//std::cout << addr.toString() << " - Still alive" << std::endl;
-					peer->last_sign_of_life = time::millis();
-					peer->resendUnackedPackets(s);
+					peer->onSignOfLife(s);
 
 					StringWriter sw;
 					{ uint8_t b = 0xb4; sw.u8(b); }
@@ -807,7 +808,6 @@ int main(int argc, const char** argv)
 					new_number_who_dis(s, addr, salt);
 					return;
 				}
-				peer->resendUnackedPackets(s);
 
 				std::string msg;
 				ser_str(sr, salt, msg);

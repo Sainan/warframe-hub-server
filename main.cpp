@@ -160,6 +160,7 @@ struct HubPeer
 	std::string loadout;
 	std::string level;
 	std::string status;
+	std::string scenario_squad_name;
 	std::vector<std::pair<uint8_t, uint8_t>> zone_pairs;
 	int16_t x, y, z;
 	int8_t rotation;
@@ -355,6 +356,20 @@ struct HubPeer
 			}
 		}
 	}
+
+	void sendWorldControlMessage(const std::string& data, Socket& s)
+	{
+		StringWriter sw;
+		{ uint8_t b = HMSG_CONTROL; sw.u8(b); }
+		sw.u16_le(this->id);
+		ser_str(sw, this->salt, const_cast<std::string&>(data));
+		this->sendReliablePacket(s, sw.data);
+	}
+
+	void sendScenario(const JsonObject& scenario, Socket& s)
+	{
+		sendWorldControlMessage(R"({"scenario":)" + scenario.encode() + "}", s);
+	}
 };
 static std::vector<HubPeer> peers;
 
@@ -391,8 +406,31 @@ static void broadcast_kick(Socket& s, uint16_t peerId)
 	}
 }
 
+static JsonObject scenario;
+
+static void delete_scenario_squads(const std::vector<std::string>& squad_names, Socket& s)
+{
+	JsonObject minScenario;
+	auto minSquads = soup::make_unique<JsonObject>();
+	for (const auto& squad_name : squad_names)
+	{
+		minSquads->add(squad_name, "delete");
+		scenario.at("squads").reinterpretAsObj().erase(squad_name);
+	}
+	minScenario.add("squads", std::move(minSquads));
+	for (auto& peer : peers)
+	{
+		peer.sendScenario(minScenario, s);
+	}
+}
+
 int main(int argc, const char** argv)
 {
+	scenario.add("id", "5e7a3e2389e3090b0c6a998b");
+	scenario.add("epochNum", 114);
+	scenario.add("endTime", "2000000000");
+	scenario.add("squads", soup::make_unique<JsonObject>());
+
 	Server serv;
 
 	ServerServiceUdp srv([](Socket& s, SocketAddr&& addr, std::string&& data, ServerServiceUdp&)
@@ -700,6 +738,7 @@ int main(int argc, const char** argv)
 					ser_str(sr, salt, peer.level);
 				}
 
+				std::vector<std::string> scenario_squad_names;
 				for (auto i = peers.begin(); i != peers.end(); )
 				{
 					if (i->addr == addr
@@ -708,12 +747,20 @@ int main(int argc, const char** argv)
 						)
 					{
 						broadcast_kick(s, i->id);
+						if (!i->scenario_squad_name.empty())
+						{
+							scenario_squad_names.emplace_back(i->scenario_squad_name);
+						}
 						i = peers.erase(i);
 					}
 					else
 					{
 						++i;
 					}
+				}
+				if (!scenario_squad_names.empty())
+				{
+					delete_scenario_squads(scenario_squad_names, s);
 				}
 
 				while (get_peer_by_id(peer.id))
@@ -759,17 +806,26 @@ int main(int argc, const char** argv)
 				sr.u16_le(peerId);
 				std::cout << addr.toString() << " - Leaving, peerId=" << peerId << std::endl;
 
+				std::vector<std::string> scenario_squad_names;
 				for (auto i = peers.begin(); i != peers.end(); )
 				{
 					if (i->addr == addr || time::millisSince(i->last_sign_of_life) > HubPeer::TIMEOUT_MS)
 					{
 						broadcast_kick(s, i->id);
+						if (!i->scenario_squad_name.empty())
+						{
+							scenario_squad_names.emplace_back(i->scenario_squad_name);
+						}
 						i = peers.erase(i);
 					}
 					else
 					{
 						++i;
 					}
+				}
+				if (!scenario_squad_names.empty())
+				{
+					delete_scenario_squads(scenario_squad_names, s);
 				}
 			}
 			break;
@@ -829,6 +885,56 @@ int main(int argc, const char** argv)
 							if (other.id != peerId && other.level == peer->level)
 							{
 								peer->introduceTo(other, s);
+							}
+						}
+					}
+					else if (jr->reinterpretAsObj().contains("msg") && jr->reinterpretAsObj().at("msg").asObj().contains("eventData"))
+					{
+						JsonArray& events = jr->reinterpretAsObj().at("msg").asObj().at("eventData").asArr();
+						for (JsonNode& event : events)
+						{
+							if (event.asObj().at("propOp").asStr() == "squad")
+							{
+								if (auto pUpValue = event.reinterpretAsObj().findUp("propValue"))
+								{
+									JsonString& propName = event.reinterpretAsObj().at("propName").asStr();
+
+									// Send a small update to existing peers
+									{
+										JsonObject minScenario;
+										{
+											auto minSquads = soup::make_unique<JsonObject>();
+											{
+												minSquads->add(propName, (*pUpValue)->asStr());
+											}
+											minScenario.add("squads", std::move(minSquads));
+										}
+										for (auto& peer : peers)
+										{
+											peer.sendScenario(minScenario, s);
+										}
+									}
+
+									// Update objects
+									if ((*pUpValue)->asStr() == "delete")
+									{
+										peer->scenario_squad_name.clear();
+										peer->scenario_squad_name.shrink_to_fit();
+										scenario.at("squads").reinterpretAsObj().erase(**pUpValue);
+									}
+									else
+									{
+										peer->scenario_squad_name = propName;
+										if (auto pUpSquad = scenario.at("squads").reinterpretAsObj().findUp(propName))
+										{
+											*pUpSquad = std::move(*pUpValue);
+										}
+										else
+										{
+											scenario.at("squads").reinterpretAsObj().add(event.reinterpretAsObj().at("propName").asStr(), std::move(*pUpValue));
+										}
+									}
+								}
 							}
 						}
 					}
@@ -911,13 +1017,7 @@ int main(int argc, const char** argv)
 
 					if (peer->level.starts_with("SCENARIOEVENTHUB5"))
 					{
-						std::string data = R"({"scenario":{"endTime":"2000000000"}})";
-
-						StringWriter sw;
-						{ uint8_t b = HMSG_CONTROL; sw.u8(b); }
-						sw.u16_le(peerId);
-						ser_str(sw, salt, data);
-						peer->sendReliablePacket(s, sw.data);
+						peer->sendScenario(scenario, s);
 					}
 				}
 				else

@@ -458,7 +458,7 @@ int main(int argc, const char** argv)
 			if (decompressed_size != expected_decompressed_size)
 			{
 				std::cout << addr.toString() << " - Decompressed size mismatch (got " << decompressed_size << ", expected " << expected_decompressed_size << "): " << string::bin2hex(data) << std::endl;
-				//return;
+				return;
 			}
 			data = std::string(buffer, decompressed_size);
 			sr = MemoryRefReader(data);
@@ -493,7 +493,7 @@ int main(int argc, const char** argv)
 								salt = "b471e49539930dc9b5a131e6247c7387A"; // < U23
 								if (crc32::hash((const uint8_t*)salt.data(), salt.size(), initial) != chksum)
 								{
-									std::cout << addr.toString() << " - Checksum mismatch" << std::endl;
+									std::cout << addr.toString() << " - Checksum mismatch: " << string::bin2hex(data) << std::endl;
 									return;
 								}
 							}

@@ -951,7 +951,7 @@ int main(int argc, const char** argv)
 							to = jr->reinterpretAsObj().at("to").asStr().value;
 						}
 						unsigned recipients = 0;
-						if (to == "all" || to == "dojo")
+						if (to == "all" || to == "dojo" || to == "clan")
 						{
 							for (auto& other : peers)
 							{

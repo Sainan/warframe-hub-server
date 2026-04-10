@@ -2,17 +2,4 @@
 
 Source-available implementation of a Warframe HUB server (used for relays & dojos).
 
-## Usage
-
-In general, it should just work. However, the HUB server does not support DTLS, so if you have a non-zero DTLS level configured, only loopback/localhost connections will work. For Bootstrapper clients, you can use its UDP proxy:
-```json
-{
-  ...
-  "dtls": 99,
-  "hubAddress": "127.0.0.1:6951",
-  "tunables": {
-    "udpProxyUpstream": "%THIS_MACHINE%:6952"
-  },
-  ...
-}
-```
+Note that DTLS connections are not supported by this implementation.
